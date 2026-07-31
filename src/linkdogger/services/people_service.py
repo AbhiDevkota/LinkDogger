@@ -23,6 +23,12 @@ from linkdogger.models.company import Company
 from linkdogger.models.person import PersonProfile
 from linkdogger.models.search import SearchResult
 from linkdogger.scoring.networking import NetworkingScorer
+from linkdogger.services.processing import (
+    ResultFilters,
+    SortKey,
+    apply_filters,
+    apply_sort,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -52,8 +58,18 @@ class PeopleService:
         self._identity_matcher = identity_matcher or IdentityMatcher()
         self._networking_scorer = networking_scorer or NetworkingScorer()
 
-    def search_company(self, company_query: str) -> SearchResult:
-        """Discover publicly discoverable people for ``company_query``."""
+    def search_company(
+        self,
+        company_query: str,
+        sort: tuple[SortKey, str] | None = None,
+        filters: ResultFilters | None = None,
+        limit: int | None = None,
+    ) -> SearchResult:
+        """Discover publicly discoverable people for ``company_query``.
+
+        ``sort`` is a ``(key, order)`` pair, ``filters`` narrows the
+        results and ``limit`` caps the returned list.
+        """
         logger.info("Searching company: %s", company_query)
         company = self._resolve_company(company_query)
         if company is None:
@@ -72,6 +88,14 @@ class PeopleService:
 
         people = self._score_people(people)
         logger.info("Networking scores calculated for %d people", len(people))
+
+        if filters is not None:
+            people = apply_filters(people, filters)
+            logger.info("Filters applied: %d people remain", len(people))
+        if sort is not None:
+            people = apply_sort(people, *sort)
+        if limit is not None:
+            people = people[:limit]
 
         return SearchResult(
             query=company_query,

@@ -11,6 +11,7 @@ from linkdogger.output.json import render_json
 from linkdogger.output.table import render_table
 from linkdogger.services.factory import build_people_service
 from linkdogger.services.people_service import PeopleService
+from linkdogger.services.processing import ResultFilters, SortKey
 
 logger = logging.getLogger(__name__)
 
@@ -63,10 +64,43 @@ def search(
         "--json",
         help="Emit machine-readable JSON instead of a table.",
     ),
+    sort: str | None = typer.Option(
+        None,
+        "--sort",
+        help=(
+            "Sort results: followers, networking-score, followback, "
+            "influence or name, each suffixed with -asc or -desc "
+            "(e.g. followers-desc)."
+        ),
+    ),
+    role: str | None = typer.Option(
+        None, "--role", help="Only show people whose role matches this text."
+    ),
+    location: str | None = typer.Option(
+        None, "--location", help="Only show people whose location matches this text."
+    ),
+    limit: int | None = typer.Option(
+        None, "--limit", help="Maximum number of results to show."
+    ),
 ) -> None:
     """Discover publicly discoverable people associated with COMPANY."""
     logger.info("Searching company: %s", company)
-    result = _build_people_service().search_company(company)
+
+    sort_key: tuple[SortKey, str] | None = None
+    if sort is not None:
+        try:
+            sort_key = SortKey.from_option(sort)
+        except ValueError:
+            raise typer.BadParameter(
+                f"invalid sort '{sort}' (expected one of "
+                "followers|networking-score|followback|influence|name "
+                "suffixed with -asc or -desc)"
+            ) from None
+
+    filters = ResultFilters(role=role, location=location)
+    result = _build_people_service().search_company(
+        company, sort=sort_key, filters=filters, limit=limit
+    )
 
     if json_output:
         console.print(render_json(result), markup=False)
