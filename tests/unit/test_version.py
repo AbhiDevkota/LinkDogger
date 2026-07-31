@@ -11,3 +11,13 @@ def test_version_is_semver_like() -> None:
 
 def test_version_is_non_empty() -> None:
     assert __version__.strip()
+
+
+def test_module_entry_point_reports_version() -> None:
+    from typer.testing import CliRunner
+
+    from linkdogger.__main__ import app
+
+    result = CliRunner().invoke(app, ["--version"])
+    assert result.exit_code == 0
+    assert __version__ in result.output
