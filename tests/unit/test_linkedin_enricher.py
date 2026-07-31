@@ -57,6 +57,8 @@ class FakeBrowserManager:
         self.headless = headless
         self.launch_options = launch_options
         self.page = None
+        self.context = _FakeContext()
+        self.init_scripts: list[str] = []
         FakeBrowserManager.launched.append(self)
 
     async def __aenter__(self) -> "FakeBrowserManager":
@@ -70,6 +72,14 @@ class FakeBrowserManager:
 
     async def save_session(self, path: str) -> None:
         self.saved = path
+
+
+class _FakeContext:
+    def __init__(self) -> None:
+        self.init_scripts: list[str] = []
+
+    async def add_init_script(self, script: str) -> None:
+        self.init_scripts.append(script)
 
 
 class FakePersonScraper:
@@ -197,6 +207,7 @@ def test_browser_is_launched_with_anti_detection_options(
     assert last_manager.launch_options["channel"] == "chrome"
     launched_args = last_manager.launch_options["args"]
     assert "--disable-blink-features=AutomationControlled" in launched_args
+    assert any("webdriver" in s for s in last_manager.context.init_scripts)
 
 
 def test_auth_error_raises_unavailable(

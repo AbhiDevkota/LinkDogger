@@ -68,7 +68,7 @@ def linkedin_launch_options() -> dict[str, object]:
     }
 
 
-def hide_automation_flags(manager: object) -> None:
+async def hide_automation_flags(manager: object) -> None:
     """Hide ``navigator.webdriver`` on the live browser context.
 
     ``load_session`` recreates the browser context, so this must run
@@ -78,7 +78,7 @@ def hide_automation_flags(manager: object) -> None:
     add_init_script = getattr(context, "add_init_script", None)
     if add_init_script is not None:
         try:
-            add_init_script(WEBDRIVER_HIDE_SCRIPT)
+            await add_init_script(WEBDRIVER_HIDE_SCRIPT)
         except Exception as exc:  # noqa: BLE001 - best-effort anti-detection
             logger.debug("Could not hide automation flags: %s", exc)
 
@@ -147,7 +147,7 @@ class LinkedInEnricher:
 
         skipped = 0
         await browser_manager.load_session(self._session_file)
-        hide_automation_flags(browser_manager)
+        await hide_automation_flags(browser_manager)
         scraper = linkedin_scraper.PersonScraper(browser_manager.page)
         for person in people:
             url = self._linkedin_url(person)

@@ -28,6 +28,7 @@ class FakeBrowserManager:
         self.headless = headless
         self.launch_options = launch_options
         self.page = None
+        self.context = _FakeContext()
         FakeBrowserManager.launched.append(self)
 
     async def __aenter__(self) -> "FakeBrowserManager":
@@ -40,16 +41,26 @@ class FakeBrowserManager:
         self.loaded = path
 
 
+class _FakeContext:
+    def __init__(self) -> None:
+        self.init_scripts: list[str] = []
+
+    async def add_init_script(self, script: str) -> None:
+        self.init_scripts.append(script)
+
+
 class FakeCompanyScraper:
-    error: Exception | None = None
+    errors: list[Exception] = []
     company: FakeCompany | None = None
+    calls = 0
 
     def __init__(self, page, callback=None) -> None:
         self.page = page
 
     async def scrape(self, url: str):
-        if FakeCompanyScraper.error is not None:
-            raise FakeCompanyScraper.error
+        FakeCompanyScraper.calls += 1
+        if FakeCompanyScraper.errors:
+            raise FakeCompanyScraper.errors.pop(0)
         return FakeCompanyScraper.company or FakeCompany()
 
 
@@ -58,8 +69,9 @@ def _install_fake_linkedin_scraper(monkeypatch: pytest.MonkeyPatch) -> None:
     module.CompanyScraper = FakeCompanyScraper
     module.BrowserManager = FakeBrowserManager
     monkeypatch.setitem(sys.modules, "linkedin_scraper", module)
-    FakeCompanyScraper.error = None
+    FakeCompanyScraper.errors = []
     FakeCompanyScraper.company = None
+    FakeCompanyScraper.calls = 0
     FakeBrowserManager.launched = []
 
 
@@ -137,10 +149,27 @@ def test_company_verification_falls_back_to_slug_on_error(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _install_fake_linkedin_scraper(monkeypatch)
-    FakeCompanyScraper.error = RuntimeError("Locator.inner_text: Timeout")
+    FakeCompanyScraper.errors = [RuntimeError("Locator.inner_text: Timeout")]
     discoverer = LinkedInCompanyDiscoverer(
         _settings(linkedin_session_file=_session_file(tmp_path))
     )
     company = discoverer.resolve_company("OpenAI")
     assert company is not None
     assert company.source == "linkedin-slug"
+
+
+def test_company_verification_retries_transient_block(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_linkedin_scraper(monkeypatch)
+    FakeCompanyScraper.company = FakeCompany(name="OpenAI")
+    FakeCompanyScraper.errors = [
+        RuntimeError("Page.goto: net::ERR_HTTP_RESPONSE_CODE_FAILURE")
+    ]
+    discoverer = LinkedInCompanyDiscoverer(
+        _settings(linkedin_session_file=_session_file(tmp_path))
+    )
+    company = discoverer.resolve_company("OpenAI")
+    assert company is not None
+    assert company.source == "linkedin-scraper"
+    assert FakeCompanyScraper.calls == 2
