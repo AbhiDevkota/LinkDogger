@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_SORT = "followback-desc"
 
+# Bump when the bundled UI assets (css/js) change so browsers never
+# serve a stale cached copy of the dashboard.
+STATIC_VERSION = "2"
+
 
 def register_routes(
     app: FastAPI, service: PeopleService, templates: Jinja2Templates
@@ -25,7 +29,9 @@ def register_routes(
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def index(request: Request) -> HTMLResponse:
         return templates.TemplateResponse(
-            request=request, name="index.html", context={}
+            request=request,
+            name="index.html",
+            context={"static_version": STATIC_VERSION},
         )
 
     @app.get("/api/search")

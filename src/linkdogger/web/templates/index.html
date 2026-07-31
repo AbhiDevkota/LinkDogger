@@ -7,17 +7,17 @@
   <meta name="description" content="Public-profile people discovery and networking intelligence. Search any company and find the people worth connecting with.">
   <meta property="og:title" content="LinkDogger">
   <meta property="og:description" content="Find the people worth connecting with at any company.">
-  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/static/favicon.svg?v={{ static_version }}" type="image/svg+xml">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ static_version }}">
 </head>
 <body>
   <nav class="navbar">
     <div class="navbar-inner">
       <a class="brand" href="/" aria-label="LinkDogger home">
-        <img src="/static/favicon.svg" alt="" width="30" height="30">
+        <img src="/static/favicon.svg?v={{ static_version }}" alt="" width="30" height="30">
         <span class="brand-name">LinkDogger</span>
         <span class="brand-tag">Beta</span>
       </a>
@@ -160,7 +160,7 @@
   <footer class="footer">
     <div class="footer-inner">
       <div class="footer-brand">
-        <img src="/static/favicon.svg" alt="" width="22" height="22">
+        <img src="/static/favicon.svg?v={{ static_version }}" alt="" width="22" height="22">
         <span>LinkDogger</span>
       </div>
       <p class="footer-note">
@@ -175,6 +175,6 @@
     </div>
   </footer>
 
-  <script src="/static/app.js" defer></script>
+  <script src="/static/app.js?v={{ static_version }}" defer></script>
 </body>
 </html>
