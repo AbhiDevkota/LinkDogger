@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 app = typer.Typer(
     name="linkdogger",
     help="Public-profile people discovery and networking intelligence.",
-    no_args_is_help=True,
+    invoke_without_command=True,
 )
 
 console = Console()
@@ -41,8 +41,24 @@ def _version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
+def _run_web() -> None:
+    """Start the local web dashboard."""
+    import uvicorn
+
+    from linkdogger.web.app import create_app
+
+    settings = get_settings()
+    console.print("[bold cyan]LinkDogger[/bold cyan] web interface")
+    console.print(
+        f"Starting server at [bold]http://{settings.web_host}:{settings.web_port}[/bold]"
+    )
+    console.print("Press Ctrl+C to stop.")
+    uvicorn.run(create_app(settings), host=settings.web_host, port=settings.web_port)
+
+
 @app.callback()
 def main(
+    ctx: typer.Context,
     version: bool = typer.Option(
         False,
         "--version",
@@ -50,12 +66,23 @@ def main(
         callback=_version_callback,
         is_eager=True,
     ),
+    web: bool = typer.Option(
+        False,
+        "--web",
+        help="Launch the local web dashboard instead of the CLI.",
+    ),
 ) -> None:
     """LinkDogger — public-profile people discovery and networking intelligence."""
     logging.basicConfig(
         level=get_settings().log_level.upper(),
         format="%(levelname)s  %(message)s",
     )
+    if web:
+        _run_web()
+        raise typer.Exit()
+    if ctx.invoked_subcommand is None:
+        typer.echo(ctx.get_help())
+        raise typer.Exit()
 
 
 @app.command()
