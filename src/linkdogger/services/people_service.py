@@ -78,6 +78,8 @@ class PeopleService:
 
         logger.info("Resolved company: %s", company.name)
         people = self._discover_people(company)
+        if limit is not None:
+            people = people[:limit]
         logger.info("Found %d candidate profiles", len(people))
 
         people, source_status = self._enrich_people(people)
