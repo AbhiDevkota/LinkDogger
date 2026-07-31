@@ -57,6 +57,7 @@ function buildCard(person) {
   const net = person.networking || {};
   const metaItems = [
     ["Location", person.location || "-"],
+    ["Email", person.email || "-"],
     ["Followers", formatFollowers(maxFollowers(person))],
     ["Networking", null],
     ["Follow-back", net.follow_back_likelihood ?? "-"],
@@ -66,7 +67,12 @@ function buildCard(person) {
     const b = document.createElement("b");
     b.textContent = `${label}: `;
     span.appendChild(b);
-    if (label === "Networking") {
+    if (label === "Email" && person.email) {
+      const anchor = document.createElement("a");
+      anchor.href = `mailto:${person.email}`;
+      anchor.textContent = person.email;
+      span.appendChild(anchor);
+    } else if (label === "Networking") {
       span.appendChild(scorePill(net.networking_score ?? null));
     } else {
       span.appendChild(document.createTextNode(String(value)));

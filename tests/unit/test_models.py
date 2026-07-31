@@ -13,6 +13,7 @@ def test_person_defaults_are_nullable() -> None:
     assert person.position is None
     assert person.location is None
     assert person.bio is None
+    assert person.email is None
     assert person.profiles == {}
     assert person.networking is None
     assert person.sources == []

@@ -72,6 +72,7 @@ class MockPeopleDiscoverer(PeopleDiscoverer):
                 company=company,
                 position="Software Engineer",
                 location="San Francisco, CA",
+                email="alex.sample@example.com",
                 profiles={
                     "linkedin": SocialProfile(
                         platform="linkedin",
@@ -117,6 +118,7 @@ class MockPeopleDiscoverer(PeopleDiscoverer):
                 company=company,
                 position="Research Scientist",
                 location="London, UK",
+                email="taylor.sample@example.com",
                 profiles={
                     "github": SocialProfile(
                         platform="github",

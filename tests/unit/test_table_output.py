@@ -32,12 +32,13 @@ def _person(
     location: str | None = None,
     followers: int | None = None,
     networking: NetworkingScore | None = None,
+    email: str | None = None,
 ) -> PersonProfile:
     profiles = {}
     if followers is not None:
         profiles["github"] = SocialProfile(
             platform="github",
-            url=f"https://github.com/{name.lower()}",
+            url=f"https://github.com/{name.lower().replace(' ', '-')}",
             username=name.lower(),
             followers=followers,
             source="test",
@@ -47,6 +48,7 @@ def _person(
         company="Acme Corporation",
         position=position,
         location=location,
+        email=email,
         profiles=profiles,
         networking=networking,
     )
@@ -83,10 +85,44 @@ def test_full_row_values() -> None:
     assert "60%" in text
 
 
+def test_email_column_shows_email() -> None:
+    text = _render(
+        render_table(_result([_person("Alice Example", email="alice@example.com")]))
+    )
+    assert "alice@example.com" in text
+
+
+def test_accounts_column_links_profiles() -> None:
+    person = _person("Alice Example", followers=10)
+    person.profiles["linkedin"] = SocialProfile(
+        platform="linkedin",
+        url="https://www.linkedin.com/in/alice-example",
+        username="alice-example",
+        source="test",
+    )
+    person.profiles["x"] = SocialProfile(
+        platform="x",
+        url="https://x.com/alice_dev",
+        username="alice_dev",
+        source="test",
+    )
+    text = _render(render_table(_result([person])))
+    assert "github" in text
+    assert "linkedin" in text
+    assert "X" in text
+
+    console = Console(record=True, width=120)
+    console.print(render_table(_result([person])))
+    html = console.export_html()
+    assert 'href="https://x.com/alice_dev"' in html
+    assert 'href="https://www.linkedin.com/in/alice-example"' in html
+    assert 'href="https://github.com/alice-example"' in html
+
+
 def test_missing_values_fall_back_to_dash() -> None:
     text = _render(render_table(_result([_person("No Data")])))
     assert "No Data" in text
-    assert "| - |" in text or text.count("-") >= 4
+    assert "| - |" in text or text.count("-") >= 6
 
 
 def test_empty_results_still_renders_title() -> None:

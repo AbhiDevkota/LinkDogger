@@ -31,6 +31,17 @@ class _RaiseEnricher:
         raise self._error
 
 
+class _RecordingEnricher:
+    name = "recorder"
+
+    def __init__(self) -> None:
+        self.seen = 0
+
+    def enrich_all(self, people: Sequence[PersonProfile]) -> list[PersonProfile]:
+        self.seen = len(people)
+        return list(people)
+
+
 class _BadCompanyDiscoverer:
     def resolve_company(self, company_query: str) -> Company:
         raise ProviderError("provider exploded")
@@ -42,12 +53,27 @@ def test_limit_caps_results() -> None:
     assert len(result.results) == 2
 
 
-def test_limit_applies_after_sort() -> None:
+def test_limit_stops_enrichment_early() -> None:
+    recorder = _RecordingEnricher()
+    result = _service(recorder).search_company("Acme", limit=1)
+    assert result.count == 1
+    assert recorder.seen == 1
+
+
+def test_sort_ranks_within_limited_candidates() -> None:
+    result = _service().search_company(
+        "Acme", sort=(SortKey.FOLLOWERS, "desc"), limit=3
+    )
+    assert result.count == 3
+    assert result.results[0].name == "Taylor Sample"
+
+
+def test_sort_ranks_first_limit_discovered() -> None:
     result = _service().search_company(
         "Acme", sort=(SortKey.FOLLOWERS, "desc"), limit=1
     )
     assert result.count == 1
-    assert result.results[0].name == "Taylor Sample"
+    assert result.results[0].name == "Alex Sample"
 
 
 def test_all_known_platforms_report_status() -> None:

@@ -19,6 +19,7 @@ class PersonProfile(BaseModel):
     position: str | None = None
     location: str | None = None
     bio: str | None = None
+    email: str | None = None
     profiles: dict[str, SocialProfile] = Field(default_factory=dict)
     networking: NetworkingScore | None = None
     sources: list[str] = Field(default_factory=list)

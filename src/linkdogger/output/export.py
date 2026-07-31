@@ -23,6 +23,7 @@ _CSV_COLUMNS = [
     "company",
     "position",
     "location",
+    "email",
     "linkedin",
     "github",
     "x",
@@ -74,16 +75,19 @@ def render_markdown(result: SearchResult) -> str:
         f"Generated at: {result.generated_at.isoformat()}",
         f"Found {result.count} publicly discoverable people",
         "",
-        "| Name | Position | Location | Followers | Networking | Follow-back |",
-        "| --- | --- | --- | ---: | ---: | ---: |",
+        "| Name | Position | Location | Email | Accounts | Followers "
+        "| Networking | Follow-back |",
+        "| --- | --- | --- | --- | --- | ---: | ---: | ---: |",
     ]
     for person in result.results:
         lines.append(
-            "| {name} | {position} | {location} | {followers} | {network} | "
-            "{followback} |".format(
+            "| {name} | {position} | {location} | {email} | {accounts} | "
+            "{followers} | {network} | {followback} |".format(
                 name=_escape_md(person.name),
                 position=_escape_md(person.position or "-"),
                 location=_escape_md(person.location or "-"),
+                email=person.email or "-",
+                accounts=_markdown_accounts(person),
                 followers=_format_followers(_max_followers(person)),
                 network=_format_int(
                     person.networking.networking_score if person.networking else None
@@ -98,12 +102,22 @@ def render_markdown(result: SearchResult) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _markdown_accounts(person: PersonProfile) -> str:
+    links = []
+    for platform, profile in person.profiles.items():
+        if profile.url:
+            label = "X" if platform == "x" else platform
+            links.append(f"[{_escape_md(label)}]({profile.url})")
+    return ", ".join(links) if links else "-"
+
+
 def _flatten(person: PersonProfile) -> dict[str, str | None]:
     return {
         "name": person.name,
         "company": person.company,
         "position": person.position,
         "location": person.location,
+        "email": person.email or "-",
         "linkedin": _url_for(person, "linkedin"),
         "github": _url_for(person, "github"),
         "x": _url_for(person, "x"),
