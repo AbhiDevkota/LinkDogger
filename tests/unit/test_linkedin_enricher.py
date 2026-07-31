@@ -39,6 +39,9 @@ class FakeClient:
     contacts: dict[str, dict] = {}
     errors: list[Exception] = []
     calls: list[tuple[str, str | None, str | None]] = []
+    dash_profiles: dict[str, dict] = {}
+    dash_errors: list[Exception] = []
+    dash_fetch_calls: list[str] = []
 
     def get_profile(self, public_id=None, urn_id=None):
         FakeClient.calls.append(("profile", public_id, urn_id))
@@ -49,6 +52,23 @@ class FakeClient:
     def get_profile_contact_info(self, public_id=None, urn_id=None):
         FakeClient.calls.append(("contact", public_id, urn_id))
         return FakeClient.contacts.get(public_id or urn_id, {})
+
+    def _fetch(self, uri: str) -> "_FakeResponse":
+        FakeClient.dash_fetch_calls.append(uri)
+        if FakeClient.dash_errors:
+            raise FakeClient.dash_errors.pop(0)
+        identifier = uri.split("memberIdentity=", 1)[-1]
+        return _FakeResponse(FakeClient.dash_profiles.get(identifier))
+
+
+class _FakeResponse:
+    status_code = 200
+
+    def __init__(self, body: dict | None) -> None:
+        self._body = body
+
+    def json(self) -> dict:
+        return self._body or {}
 
 
 class FakeLinkedin(FakeClient):
@@ -114,6 +134,9 @@ def _install_fake_linkedin_api(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeLinkedin.instances = []
     FakeLinkedin.errors = []
     FakeLibrarySession.calls = []
+    FakeClient.dash_profiles = {}
+    FakeClient.dash_errors = []
+    FakeClient.dash_fetch_calls = []
 
 
 def _person_with_linkedin() -> PersonProfile:
@@ -463,6 +486,50 @@ def test_no_timeout_wrapper_without_value(monkeypatch: pytest.MonkeyPatch) -> No
     client = get_linkedin_client("me@acme.com", "pw")
     client.client.session.request("GET", "https://example.com")
     assert "timeout" not in FakeLibrarySession.calls[-1][2]
+
+
+def test_profile_falls_back_to_dash_when_library_endpoint_is_retired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The legacy profileView endpoint crashes the library; Dash covers it."""
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.errors = [KeyError("message")]
+    FakeClient.dash_profiles["alice-example"] = {
+        "elements": [
+            {
+                "firstName": {"text": "Alice"},
+                "lastName": {"text": "Example"},
+                "headline": {"text": "Engineer at Acme"},
+                "locationName": "Berlin, Germany",
+                "publicIdentifier": "alice-example",
+            }
+        ]
+    }
+    enricher = LinkedInEnricher()
+    enricher._email = "me@acme.com"  # noqa: SLF001
+    enricher._password = "pw"  # noqa: SLF001
+    result = enricher.enrich_all([_person_with_linkedin()])
+    assert result[0].position == "Engineer at Acme"
+    assert result[0].location == "Berlin, Germany"
+    assert FakeClient.dash_fetch_calls == [
+        "/identity/dash/profiles?q=memberIdentity&memberIdentity=alice-example"
+    ]
+
+
+def test_dash_failure_trips_circuit_breaker_for_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A hard Dash failure must not repeat per person (each retry sleeps)."""
+    _install_fake_linkedin_api(monkeypatch)
+    from linkdogger.linkedin_api import get_linkedin_client, get_profile
+
+    client = get_linkedin_client("me@acme.com", "pw")
+    FakeClient.errors = [KeyError("message"), KeyError("message")]
+    FakeClient.dash_errors = [RuntimeError("redirect loop")]
+    assert get_profile(client, urn_id="123456") == {}
+    assert get_profile(client, urn_id="654321") == {}
+    assert len(FakeClient.dash_fetch_calls) == 1
+    assert getattr(client, "_linkdogger_dash_broken", False) is True
 
 
 def test_enrichment_pipeline_marks_linkedin_status(

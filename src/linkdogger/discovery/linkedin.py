@@ -11,8 +11,9 @@ With credentials the provider can now do full LinkedIn discovery:
 * companies resolve through ``search_companies`` (the real company name
   and its URN id, which people search filters on);
 * people are discovered through ``search_people``, filtered to the
-  company's URN id when available (the library respects LinkedIn's rate
-  limits by sleeping between requests).
+  company's URN id when available — including out-of-network members,
+  which is everyone for a public-discovery tool (the library respects
+  LinkedIn's rate limits by sleeping between requests).
 
 Without credentials, company resolution falls back to the slug-derived
 URL (honestly marked ``linkedin-slug``) and people discovery reports
@@ -187,10 +188,17 @@ class LinkedInPeopleDiscoverer(PeopleDiscoverer):
         return people
 
     def _search(self, client: Any, company: Company) -> list[dict[str, Any]]:
+        # The library's default include_private_profiles=False drops every
+        # out-of-network member — for company discovery that is everyone,
+        # so the search would always come back empty.
+        kwargs: dict[str, Any] = {
+            "limit": self._limit,
+            "include_private_profiles": True,
+        }
         urn_id = _company_urn_id(company)
         if urn_id is not None:
-            return client.search_people(current_company=[urn_id], limit=self._limit)
-        return client.search_people(keywords=company.name, limit=self._limit)
+            return client.search_people(current_company=[urn_id], **kwargs)
+        return client.search_people(keywords=company.name, **kwargs)
 
 
 def _company_urn_id(company: Company) -> str | None:

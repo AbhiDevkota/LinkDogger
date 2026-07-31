@@ -26,7 +26,11 @@ from typing import Any
 
 from linkdogger.config.settings import Settings
 from linkdogger.errors import EnrichmentIncompleteError, SourceUnavailableError
-from linkdogger.linkedin_api import get_linkedin_client, get_linkedin_errors
+from linkdogger.linkedin_api import (
+    get_linkedin_client,
+    get_linkedin_errors,
+    get_profile,
+)
 from linkdogger.models.person import PersonProfile
 from linkdogger.models.social import SocialProfile
 
@@ -89,7 +93,7 @@ class LinkedInEnricher:
     ) -> bool:
         """Enrich one person; return ``False`` when the profile was skipped."""
         public_id, urn_id = _profile_ids(profile)
-        data = client.get_profile(public_id=public_id, urn_id=urn_id)
+        data = get_profile(client, public_id=public_id, urn_id=urn_id)
         if not data:
             logger.info("LinkedIn profile not found or private: %s", profile)
             return False

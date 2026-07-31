@@ -150,6 +150,87 @@ def _with_session_timeout(client: Any, timeout: float | None) -> Any:
     return client
 
 
+def get_profile(
+    client: Any, public_id: str | None = None, urn_id: str | None = None
+) -> dict[str, Any]:
+    """Fetch a LinkedIn profile, best-effort.
+
+    The library's ``get_profile`` calls the legacy Voyager ``profileView``
+    endpoint, which LinkedIn has retired (it answers 410) — and the
+    library then crashes on the error payload (``KeyError: 'message'``).
+    This shim falls back to the Dash ``profiles`` REST endpoint, which
+    still answers for member URNs, and returns ``{}`` when neither works.
+    Nothing is fabricated.
+    """
+    try:
+        data = client.get_profile(public_id=public_id, urn_id=urn_id)
+    except Exception as exc:  # noqa: BLE001 - the library raises on retired endpoints
+        challenge_error, unauthorized_error = get_linkedin_errors()
+        if isinstance(exc, (challenge_error, unauthorized_error)):
+            raise
+        data = {}
+    if data:
+        return data
+    return _dash_profile(client, public_id or urn_id)
+
+
+def _dash_profile(client: Any, identifier: str | None) -> dict[str, Any]:
+    """Dash REST profile lookup with a run-level circuit breaker.
+
+    LinkedIn gates the Dash endpoint aggressively (it redirect-loops a
+    flagged session), so after the first hard failure we stop trying for
+    the rest of the run instead of burning a 2-5 s sleep per person on
+    doomed requests.
+    """
+    if not identifier or getattr(client, "_linkdogger_dash_broken", False):
+        return {}
+    try:
+        res = client._fetch(
+            f"/identity/dash/profiles?q=memberIdentity&memberIdentity={identifier}"
+        )
+        body = res.json() or {}
+    except Exception as exc:  # noqa: BLE001 - network/auth failures are varied
+        client._linkdogger_dash_broken = True
+        logger.warning(
+            "LinkedIn profile enrichment unavailable (Dash endpoint blocked: "
+            "%s); results carry discovery data only",
+            exc,
+        )
+        return {}
+    if res.status_code != 200:
+        return {}
+    elements = body.get("elements") or []
+    if not elements:
+        return {}
+    return _map_dash_profile(elements[0])
+
+
+def _map_dash_profile(element: dict[str, Any]) -> dict[str, Any]:
+    """Map a Dash profile element onto the keys the enricher consumes."""
+
+    def _text(value: Any) -> str | None:
+        if isinstance(value, str) and value:
+            return value
+        if isinstance(value, dict):
+            for key in ("text", "localized"):
+                text = value.get(key)
+                if isinstance(text, str) and text:
+                    return text
+        return None
+
+    profile = {
+        "firstName": _text(element.get("firstName")),
+        "lastName": _text(element.get("lastName")),
+        "headline": _text(element.get("headline")),
+        "summary": _text(element.get("summary")),
+        "locationName": _text(element.get("locationName")),
+        "public_id": element.get("publicIdentifier"),
+    }
+    if not any((profile["firstName"], profile["lastName"], profile["headline"])):
+        return {}
+    return {key: value for key, value in profile.items() if value is not None}
+
+
 def _cookies_from_file(path: str) -> Any:
     """Load a ``RequestsCookieJar`` from a ``linkdogger linkedin-login`` file."""
     from requests.cookies import RequestsCookieJar

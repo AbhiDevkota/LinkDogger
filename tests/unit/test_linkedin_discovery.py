@@ -42,6 +42,7 @@ class FakeClient:
                 "keywords": keywords,
                 "current_company": current_company,
                 "limit": limit,
+                "kwargs": kwargs,
             }
         )
         if FakeClient.errors:
@@ -229,7 +230,12 @@ def test_people_discovery_uses_company_urn(
     assert linkedin.username == "99"
     assert linkedin.url is None
     assert FakeClient.people_search_calls == [
-        {"keywords": None, "current_company": ["1234"], "limit": 100}
+        {
+            "keywords": None,
+            "current_company": ["1234"],
+            "limit": 100,
+            "kwargs": {"include_private_profiles": True},
+        }
     ]
 
 
@@ -241,7 +247,12 @@ def test_people_discovery_falls_back_to_keywords(
     discoverer = LinkedInPeopleDiscoverer(_settings(**_creds()))
     discoverer.discover_people(_company())
     assert FakeClient.people_search_calls == [
-        {"keywords": "Acme", "current_company": None, "limit": 100}
+        {
+            "keywords": "Acme",
+            "current_company": None,
+            "limit": 100,
+            "kwargs": {"include_private_profiles": True},
+        }
     ]
 
 
