@@ -1,6 +1,16 @@
-"""Discovery interfaces."""
+"""Discovery backends and interfaces."""
 
-from linkdogger.discovery.base import PeopleDiscoverer
-from linkdogger.discovery.mock import MockPeopleDiscoverer
+from linkdogger.discovery.base import CompanyDiscoverer, PeopleDiscoverer
+from linkdogger.discovery.mock import (
+    MOCK_SOURCE,
+    MockCompanyDiscoverer,
+    MockPeopleDiscoverer,
+)
 
-__all__ = ["PeopleDiscoverer", "MockPeopleDiscoverer"]
+__all__ = [
+    "CompanyDiscoverer",
+    "PeopleDiscoverer",
+    "MOCK_SOURCE",
+    "MockCompanyDiscoverer",
+    "MockPeopleDiscoverer",
+]

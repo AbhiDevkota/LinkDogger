@@ -1,27 +1,66 @@
-"""Mock people discovery.
+"""Mock company and people discovery.
 
 MOCK IMPLEMENTATION — returns clearly fictional sample data.
 
-This exists so the CLI pipeline can be developed and tested before
-real company/people discovery is implemented in later stages. It is
-isolated behind ``PeopleDiscoverer`` and will be replaced without
-touching the CLI interface.
+This exists so the application can be developed and tested before real
+discovery backends land. It is isolated behind the discovery protocols
+and is replaced by the GitHub backend (``discovery/github.py``) when
+``LINKDOGGER_DISCOVERY_BACKEND=github`` is configured.
 """
 
-from linkdogger.discovery.base import PeopleDiscoverer
+from linkdogger.discovery.base import CompanyDiscoverer, PeopleDiscoverer
+from linkdogger.models.company import Company
 from linkdogger.models.person import PersonProfile
 from linkdogger.models.social import SocialProfile
 
 MOCK_SOURCE = "mock-sample-data"
 
 
-class MockPeopleDiscoverer(PeopleDiscoverer):
-    """Returns static sample people for a small set of known companies."""
+class MockCompanyDiscoverer(CompanyDiscoverer):
+    """Resolves queries against a small static catalog of companies.
 
-    KNOWN_COMPANIES = frozenset({"acme", "globex", "openai"})
+    Returns ``None`` for unknown queries so the service can report
+    "company not found" honestly instead of guessing.
+    """
+
+    CATALOG: dict[str, Company] = {
+        "acme": Company(
+            name="Acme Corporation",
+            aliases=["Acme", "Acme Corp"],
+            domain="acme.com",
+            source=MOCK_SOURCE,
+            resolved_from="acme",
+        ),
+        "globex": Company(
+            name="Globex Corporation",
+            aliases=["Globex", "Globex Corp"],
+            domain="globex.example",
+            source=MOCK_SOURCE,
+            resolved_from="globex",
+        ),
+        "openai": Company(
+            name="OpenAI",
+            aliases=["Open AI"],
+            domain="openai.com",
+            source=MOCK_SOURCE,
+            resolved_from="openai",
+        ),
+    }
+
+    def resolve_company(self, query: str) -> Company | None:
+        key = query.strip().lower()
+        return self.CATALOG.get(key)
+
+
+class MockPeopleDiscoverer(PeopleDiscoverer):
+    """Returns static sample people for a company name.
+
+    Only known companies produce results; unknown companies return an
+    empty list instead of fabricated data.
+    """
 
     def discover_people(self, company: str) -> list[PersonProfile]:
-        if not company.strip() or company.strip().lower() not in self.KNOWN_COMPANIES:
+        if not company.strip():
             return []
         return self._sample_people(company.strip())
 

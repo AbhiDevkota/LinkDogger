@@ -30,16 +30,16 @@ def test_no_args_shows_help() -> None:
 def test_search_shows_results() -> None:
     result = runner.invoke(app, ["search", "Acme"])
     assert result.exit_code == 0
-    assert "Acme" in result.output
+    assert "Acme Corporation" in result.output
     assert "publicly discoverable people" in result.output
     assert "Alex Sample" in result.output
     assert "Software Engineer" in result.output
 
 
-def test_search_unknown_company_reports_zero() -> None:
+def test_search_unknown_company_reports_not_found() -> None:
     result = runner.invoke(app, ["search", "Nonexistent Company"])
-    assert result.exit_code == 0
-    assert "Found 0 publicly discoverable people" in result.output
+    assert result.exit_code == 1
+    assert "Company not found" in result.output
 
 
 def test_search_json_output() -> None:
@@ -48,8 +48,17 @@ def test_search_json_output() -> None:
     payload = json.loads(result.output)
     assert payload["schema_version"] == "1.0"
     assert payload["query"] == "Acme"
+    assert payload["company"]["name"] == "Acme Corporation"
     assert payload["count"] == 3
     assert payload["results"][0]["name"] == "Alex Sample"
+
+
+def test_search_json_unknown_company() -> None:
+    result = runner.invoke(app, ["search", "Nonexistent Company", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["company"] is None
+    assert payload["count"] == 0
 
 
 def test_search_missing_company_errors() -> None:

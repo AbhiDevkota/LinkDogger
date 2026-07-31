@@ -7,9 +7,9 @@ from rich.console import Console
 
 from linkdogger import __version__
 from linkdogger.config.settings import get_settings
-from linkdogger.discovery.mock import MockPeopleDiscoverer
 from linkdogger.output.json import render_json
 from linkdogger.output.table import render_table
+from linkdogger.services.factory import build_people_service
 from linkdogger.services.people_service import PeopleService
 
 logger = logging.getLogger(__name__)
@@ -24,13 +24,12 @@ console = Console()
 
 
 def _build_people_service() -> PeopleService:
-    """Build the application service.
+    """Build the application service from the configured backend.
 
-    NOTE: currently wired to ``MockPeopleDiscoverer`` (clearly fictional
-    sample data) until real company/people discovery lands in later
-    stages. The CLI interface does not depend on this choice.
+    Defaults to clearly marked sample data (mock backend) until the
+    GitHub backend is configured via ``LINKDOGGER_DISCOVERY_BACKEND``.
     """
-    return PeopleService(MockPeopleDiscoverer())
+    return build_people_service(get_settings())
 
 
 def _version_callback(value: bool) -> None:
@@ -74,7 +73,14 @@ def search(
         return
 
     console.print(f"[bold cyan]LinkDogger[/bold cyan] v{__version__}")
-    console.print(f"[bold]Company:[/bold] {result.query}")
+    if result.company is None:
+        console.print(f"[bold red]Company not found:[/bold red] {result.query}")
+        console.print("No company could be resolved from that query.")
+        raise typer.Exit(code=1)
+
+    console.print(f"[bold]Company:[/bold] {result.company.name}")
+    if result.company.domain:
+        console.print(f"[bold]Domain:[/bold] {result.company.domain}")
     console.print(f"Found [bold]{result.count}[/bold] publicly discoverable people")
     console.print()
     console.print(render_table(result))
