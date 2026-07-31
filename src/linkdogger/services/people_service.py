@@ -92,9 +92,16 @@ class PeopleService:
         people = self._score_people(people)
         logger.info("Networking scores calculated for %d people", len(people))
 
+        filtered_out_count = 0
         if filters is not None:
+            before = len(people)
             people = apply_filters(people, filters)
-            logger.info("Filters applied: %d people remain", len(people))
+            filtered_out_count = before - len(people)
+            logger.info(
+                "Filters applied: %d people remain (%d excluded)",
+                len(people),
+                filtered_out_count,
+            )
         if sort is not None:
             people = apply_sort(people, *sort)
         else:
@@ -110,6 +117,7 @@ class PeopleService:
             results=people,
             source_status=source_status,
             warnings=warnings,
+            filtered_out_count=filtered_out_count,
         )
 
     def _resolve_company(

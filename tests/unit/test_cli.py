@@ -48,6 +48,15 @@ def test_search_with_log_shows_results() -> None:
     assert "Alex Sample" in result.output
 
 
+def test_search_reports_profiles_excluded_by_filters() -> None:
+    result = runner.invoke(
+        app, ["search", "Acme", "--provider", "mock", "--location", "nowhere"]
+    )
+    assert result.exit_code == 0
+    assert "excluded by your filters" in result.output
+    assert "3" in result.output.split("excluded")[0]
+
+
 def test_search_json_output() -> None:
     result = runner.invoke(app, ["search", "Acme", "--json", "--provider", "mock"])
     assert result.exit_code == 0

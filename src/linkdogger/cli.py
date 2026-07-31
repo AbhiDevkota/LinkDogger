@@ -192,6 +192,11 @@ def search(
     if result.company.domain:
         console.print(f"[bold]Domain:[/bold] {result.company.domain}")
     console.print(f"Found [bold]{result.count}[/bold] publicly discoverable people")
+    if result.filtered_out_count > 0:
+        console.print(
+            f"[dim]{result.filtered_out_count} discovered profile(s) were "
+            "excluded by your filters (e.g. --location, --role).[/dim]"
+        )
     console.print()
     _print_warnings(result)
     console.print(render_table(result))

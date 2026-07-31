@@ -3,7 +3,7 @@
 from linkdogger.config.settings import Settings
 from linkdogger.discovery.mock import MockCompanyDiscoverer, MockPeopleDiscoverer
 from linkdogger.services.people_service import PeopleService
-from linkdogger.services.processing import SortKey
+from linkdogger.services.processing import ResultFilters, SortKey
 
 
 def _service() -> PeopleService:
@@ -52,3 +52,14 @@ def test_service_explicit_sort_overrides_default() -> None:
     result = _service().search_company("Acme", sort=(SortKey.NAME, "asc"))
     assert result.results[0].name == "Alex Sample"
     assert [p.name for p in result.results] == sorted([p.name for p in result.results])
+
+
+def test_service_counts_profiles_excluded_by_filters() -> None:
+    result = _service().search_company("Acme", filters=ResultFilters(location="nope"))
+    assert result.count == 0
+    assert result.filtered_out_count == len(_service().search_company("Acme").results)
+
+
+def test_service_reports_zero_filtered_without_filters() -> None:
+    result = _service().search_company("Acme")
+    assert result.filtered_out_count == 0
