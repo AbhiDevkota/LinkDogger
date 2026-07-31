@@ -13,7 +13,7 @@ from linkdogger.services.processing import ResultFilters, SortKey
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SORT = "networking-score-desc"
+DEFAULT_SORT = "followback-desc"
 
 
 def register_routes(

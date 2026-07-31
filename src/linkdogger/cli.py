@@ -93,13 +93,18 @@ def search(
         "--json",
         help="Emit machine-readable JSON instead of a table.",
     ),
+    log_output: bool = typer.Option(
+        False,
+        "--log",
+        help="Show detailed search logs instead of the progress animation.",
+    ),
     sort: str | None = typer.Option(
         None,
         "--sort",
         help=(
             "Sort results: followers, networking-score, followback, "
             "influence or name, each suffixed with -asc or -desc "
-            "(e.g. followers-desc)."
+            "(e.g. followers-desc). Defaults to followback-desc."
         ),
     ),
     role: str | None = typer.Option(
@@ -116,7 +121,8 @@ def search(
     ),
 ) -> None:
     """Discover publicly discoverable people associated with COMPANY."""
-    logger.info("Searching company: %s", company)
+    if not log_output:
+        logging.getLogger().setLevel(logging.WARNING)
 
     sort_key: tuple[SortKey, str] | None = None
     if sort is not None:
@@ -130,9 +136,19 @@ def search(
             ) from None
 
     filters = ResultFilters(role=role, location=location)
-    result = _build_people_service().search_company(
-        company, sort=sort_key, filters=filters, limit=limit
-    )
+    service = _build_people_service()
+
+    if log_output or json_output:
+        result = service.search_company(
+            company, sort=sort_key, filters=filters, limit=limit
+        )
+    else:
+        with console.status(
+            "[bold cyan]Searching[/bold cyan] for publicly discoverable people..."
+        ):
+            result = service.search_company(
+                company, sort=sort_key, filters=filters, limit=limit
+            )
 
     if export is not None:
         try:
@@ -142,7 +158,7 @@ def search(
         console.print(f"[green]{message}[/green]")
 
     if json_output:
-        console.print(render_json(result), markup=False)
+        console.print(render_json(result), markup=False, soft_wrap=True)
         return
 
     console.print(f"[bold cyan]LinkDogger[/bold cyan] v{__version__}")

@@ -33,3 +33,20 @@ def test_nullable_fields_serialize_as_null() -> None:
     assert payload["results"][0]["location"] is None
     assert payload["results"][0]["profiles"] == {}
     assert payload["results"][0]["networking"] is None
+
+
+def test_control_characters_in_bio_produce_valid_json() -> None:
+    result = SearchResult(
+        query="Acme",
+        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        count=1,
+        results=[
+            PersonProfile(
+                name="Alex Sample",
+                bio="line one\r\nline two\twith tab",
+            )
+        ],
+    )
+    text = render_json(result)
+    payload = json.loads(text)
+    assert payload["results"][0]["bio"] == "line one\r\nline two\twith tab"

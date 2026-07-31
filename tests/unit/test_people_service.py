@@ -3,6 +3,7 @@
 from linkdogger.config.settings import Settings
 from linkdogger.discovery.mock import MockCompanyDiscoverer, MockPeopleDiscoverer
 from linkdogger.services.people_service import PeopleService
+from linkdogger.services.processing import SortKey
 
 
 def _service() -> PeopleService:
@@ -34,3 +35,20 @@ def test_service_handles_blank_query() -> None:
     result = _service().search_company("   ")
     assert result.company is None
     assert result.count == 0
+
+
+def test_service_defaults_to_followback_descending() -> None:
+    result = _service().search_company("Acme")
+    likelihoods = [
+        person.networking.follow_back_likelihood
+        for person in result.results
+        if person.networking is not None
+    ]
+    assert likelihoods == sorted(likelihoods, reverse=True)
+    assert result.results[0].name == "Alex Sample"
+
+
+def test_service_explicit_sort_overrides_default() -> None:
+    result = _service().search_company("Acme", sort=(SortKey.NAME, "asc"))
+    assert result.results[0].name == "Alex Sample"
+    assert [p.name for p in result.results] == sorted([p.name for p in result.results])
