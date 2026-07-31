@@ -103,3 +103,30 @@ def test_linkedin_provider_reports_discovery_gap() -> None:
     payload = json.loads(result.output)
     assert payload["count"] == 0
     assert any("LinkedIn" in w for w in payload["warnings"])
+
+
+def test_linkedin_login_without_cookie_file_errors() -> None:
+    result = runner.invoke(app, ["linkedin-login"])
+    assert result.exit_code != 0
+    assert "LINKDOGGER_LINKEDIN_COOKIE_FILE" in result.output
+
+
+def test_linkedin_login_saves_cookie_file(tmp_path, monkeypatch) -> None:
+    cookie_file = tmp_path / "linkedin-cookies.json"
+    monkeypatch.setenv("LINKDOGGER_LINKEDIN_COOKIE_FILE", str(cookie_file))
+    result = runner.invoke(
+        app,
+        ["linkedin-login"],
+        input="li-at-value\najax:1234567890\n",
+    )
+    assert result.exit_code == 0
+    payload = json.loads(cookie_file.read_text(encoding="utf-8"))
+    assert payload == {"li_at": "li-at-value", "JSESSIONID": "ajax:1234567890"}
+
+
+def test_linkedin_login_rejects_empty_cookies(tmp_path, monkeypatch) -> None:
+    cookie_file = tmp_path / "linkedin-cookies.json"
+    monkeypatch.setenv("LINKDOGGER_LINKEDIN_COOKIE_FILE", str(cookie_file))
+    result = runner.invoke(app, ["linkedin-login"], input="\n")
+    assert result.exit_code != 0
+    assert not cookie_file.exists()

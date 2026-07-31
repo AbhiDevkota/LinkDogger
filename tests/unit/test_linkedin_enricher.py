@@ -5,6 +5,7 @@ these tests inject a fake module via ``sys.modules`` to exercise
 LinkDogger's own logic.
 """
 
+import json
 import sys
 import types
 
@@ -62,6 +63,7 @@ class FakeLinkedin(FakeClient):
         authenticate: bool = True,
         refresh_cookies: bool = False,
         cookies_dir: str = "",
+        cookies=None,
     ) -> None:
         FakeLinkedin.instances.append(
             {
@@ -70,6 +72,7 @@ class FakeLinkedin(FakeClient):
                 "authenticate": authenticate,
                 "refresh_cookies": refresh_cookies,
                 "cookies_dir": cookies_dir,
+                "cookies": cookies,
             }
         )
         if FakeLinkedin.errors:
@@ -350,6 +353,78 @@ def test_auth_error_mid_run_raises_unavailable(
     enricher._password = "secret"  # noqa: SLF001
     with pytest.raises(SourceUnavailableError, match="session ended"):
         enricher.enrich_all([_person_with_linkedin(), _person_with_urn("123456")])
+
+
+def _cookie_file(tmp_path) -> str:
+    path = tmp_path / "linkedin-cookies.json"
+    path.write_text(
+        json.dumps({"li_at": "abc123", "JSESSIONID": "ajax:xyz"}),
+        encoding="utf-8",
+    )
+    return str(path)
+
+
+def test_session_cookies_are_used_from_file(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.profiles["alice-example"] = _alice_profile_data()
+    enricher = LinkedInEnricher()
+    enricher._cookie_file = _cookie_file(tmp_path)  # noqa: SLF001
+    result = enricher.enrich_all([_person_with_linkedin()])
+    assert result[0].position == "Engineer at Acme"
+    instance = FakeLinkedin.instances[0]
+    assert instance["cookies"] is not None
+    assert instance["cookies"].get("li_at") == "abc123"
+    assert instance["cookies"].get("JSESSIONID") == "ajax:xyz"
+
+
+def test_cookie_file_takes_priority_over_credentials(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.profiles["alice-example"] = _alice_profile_data()
+    enricher = LinkedInEnricher()
+    enricher._email = "me@acme.com"  # noqa: SLF001
+    enricher._password = "pw"  # noqa: SLF001
+    enricher._cookie_file = _cookie_file(tmp_path)  # noqa: SLF001
+    enricher.enrich_all([_person_with_linkedin()])
+    assert FakeLinkedin.instances[0]["cookies"] is not None
+
+
+def test_missing_cookie_file_raises_unavailable(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    enricher = LinkedInEnricher()
+    enricher._cookie_file = str(tmp_path / "missing.json")  # noqa: SLF001
+    with pytest.raises(SourceUnavailableError, match="cookie file not found"):
+        enricher.enrich_all([_person_with_linkedin()])
+
+
+def test_cookie_file_requires_both_cookies(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    path = tmp_path / "bad.json"
+    path.write_text(json.dumps({"li_at": "abc123"}), encoding="utf-8")
+    enricher = LinkedInEnricher()
+    enricher._cookie_file = str(path)  # noqa: SLF001
+    with pytest.raises(SourceUnavailableError, match="missing li_at/JSESSIONID"):
+        enricher.enrich_all([_person_with_linkedin()])
+
+
+def test_cookie_file_from_settings(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from linkdogger.config.settings import Settings
+
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.profiles["alice-example"] = _alice_profile_data()
+    settings = Settings(
+        _env_file=None,
+        linkedin_cookie_file=_cookie_file(tmp_path),
+    )
+    result = LinkedInEnricher(settings).enrich_all([_person_with_linkedin()])
+    assert result[0].position == "Engineer at Acme"
 
 
 def test_enrichment_pipeline_marks_linkedin_status(

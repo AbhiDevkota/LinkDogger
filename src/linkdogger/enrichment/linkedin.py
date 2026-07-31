@@ -44,6 +44,7 @@ class LinkedInEnricher:
         self._email = settings.linkedin_email if settings else None
         self._password = settings.linkedin_password if settings else None
         self._cookies_dir = settings.linkedin_cookies_dir if settings else None
+        self._cookie_file = settings.linkedin_cookie_file if settings else None
         self._client: Any | None = None
 
     def enrich_all(self, people: Sequence[PersonProfile]) -> list[PersonProfile]:
@@ -52,7 +53,7 @@ class LinkedInEnricher:
             return list(people)
 
         client = self._client or get_linkedin_client(
-            self._email, self._password, self._cookies_dir
+            self._email, self._password, self._cookies_dir, self._cookie_file
         )
         self._client = client
         challenge_error, unauthorized_error = get_linkedin_errors()

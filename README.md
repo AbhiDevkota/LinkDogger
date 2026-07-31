@@ -78,6 +78,7 @@ started. Secrets are never committed.
 | `LINKDOGGER_LINKEDIN_EMAIL` | *(none)* | LinkedIn account email for the optional LinkedIn provider. |
 | `LINKDOGGER_LINKEDIN_PASSWORD` | *(none)* | LinkedIn account password (never committed). |
 | `LINKDOGGER_LINKEDIN_COOKIES_DIR` | *(none)* | Directory for the library's cached session cookies (default: `~/.linkedin_api/cookies/`). |
+| `LINKDOGGER_LINKEDIN_COOKIE_FILE` | *(none)* | Path to a session cookie file (`li_at` + `JSESSIONID`, created by `linkdogger linkedin-login`); takes priority over credentials. |
 | `LINKDOGGER_REQUEST_TIMEOUT_SECONDS` | `10.0` | Timeout for provider calls. |
 | `LINKDOGGER_MAX_RESULTS` | `100` | Default maximum results per search. |
 
@@ -94,14 +95,25 @@ The CLI selects a **provider** with `--provider` (default `linkedin`):
 
 > **LinkedIn setup:** the LinkedIn provider uses your own account through the
 > `open-linkedin-api` library (an HTTP client for LinkedIn's Voyager API, not
-> a browser). Install the optional extra and set your credentials:
+> a browser). Install the optional extra and authenticate either way:
 >
 > ```bash
 > pip install -e ".[linkedin]"
-> # set LINKDOGGER_LINKEDIN_EMAIL and LINKDOGGER_LINKEDIN_PASSWORD in .env
 > ```
 >
-> Without credentials the `linkedin` provider still resolves companies via
+> **Option A — session cookies (recommended when password login hits a
+> challenge):** log in once in your browser, then paste your cookies:
+>
+> ```bash
+> # set LINKDOGGER_LINKEDIN_COOKIE_FILE=linkedin-cookies.json in .env
+> linkdogger linkedin-login   # prompts for li_at + JSESSIONID
+> ```
+>
+> **Option B — credentials:** set `LINKDOGGER_LINKEDIN_EMAIL` and
+> `LINKDOGGER_LINKEDIN_PASSWORD` in `.env`; the library logs in and caches
+> the session cookies for reuse.
+>
+> Without either, the `linkedin` provider still resolves companies via
 > slug URLs but honestly reports that people discovery is unavailable.
 > The library sleeps between requests to respect LinkedIn's rate limits —
 > expect enrichment to take a few seconds per profile.

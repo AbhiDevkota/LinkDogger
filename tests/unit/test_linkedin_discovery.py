@@ -1,5 +1,6 @@
 """LinkedIn discovery behavior."""
 
+import json
 import sys
 import types
 
@@ -55,12 +56,14 @@ class FakeLinkedin(FakeClient):
         authenticate: bool = True,
         refresh_cookies: bool = False,
         cookies_dir: str = "",
+        cookies=None,
     ) -> None:
         FakeLinkedin.instances.append(
             {
                 "username": username,
                 "password": password,
                 "cookies_dir": cookies_dir,
+                "cookies": cookies,
             }
         )
 
@@ -87,6 +90,7 @@ def _install_fake_linkedin_api(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeClient.company_search_calls = []
     FakeClient.company_lookups = []
     FakeClient.people_search_calls = []
+    FakeLinkedin.instances = []
 
 
 def _settings(**overrides) -> Settings:
@@ -253,3 +257,21 @@ def test_people_discovery_respects_max_results(
     discoverer = LinkedInPeopleDiscoverer(_settings(**_creds(max_results=5)))
     discoverer.discover_people(_company())
     assert FakeClient.people_search_calls[0]["limit"] == 5
+
+
+def test_people_discovery_with_cookie_file(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.people = [{"urn_id": "1", "name": "Alice A", "jobtitle": "Engineer"}]
+    cookie_file = tmp_path / "linkedin-cookies.json"
+    cookie_file.write_text(
+        json.dumps({"li_at": "abc123", "JSESSIONID": "ajax:xyz"}),
+        encoding="utf-8",
+    )
+    discoverer = LinkedInPeopleDiscoverer(
+        _settings(linkedin_cookie_file=str(cookie_file))
+    )
+    people = discoverer.discover_people(_company())
+    assert len(people) == 1
+    assert FakeLinkedin.instances[0]["cookies"] is not None

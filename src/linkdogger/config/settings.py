@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     linkedin_email: str | None = None
     linkedin_password: str | None = None
     linkedin_cookies_dir: str | None = None
+    linkedin_cookie_file: str | None = None
 
 
 @lru_cache

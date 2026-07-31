@@ -1,5 +1,6 @@
 """LinkDogger command-line interface."""
 
+import json
 import logging
 from pathlib import Path
 
@@ -202,3 +203,38 @@ def search(
     console.print(render_table(result))
     console.print()
     console.print("[dim]Use --json for machine-readable output.[/dim]")
+
+
+@app.command("linkedin-login")
+def linkedin_login() -> None:
+    """Save your LinkedIn session cookies for the LinkedIn provider.
+
+    Log in once in your normal browser, then paste the ``li_at`` and
+    ``JSESSIONID`` cookie values here. They are saved to the cookie file
+    configured in ``LINKDOGGER_LINKEDIN_COOKIE_FILE`` and used by the
+    LinkedIn provider (``open-linkedin-api``) instead of a password
+    login — useful when LinkedIn challenges password logins. The file
+    holds live session cookies: it is yours, never shared or committed.
+    """
+    settings = get_settings()
+    cookie_file = settings.linkedin_cookie_file
+    if not cookie_file:
+        raise typer.BadParameter(
+            "set LINKDOGGER_LINKEDIN_COOKIE_FILE first (see .env.example)"
+        )
+    console.print("[bold]Log in once in your normal browser:[/bold]")
+    console.print("1. Open https://www.linkedin.com and log in as usual.")
+    console.print("2. Press F12 (DevTools) → Application → Cookies → linkedin.com")
+    console.print("3. Copy the values of the cookies [bold]li_at[/bold] and")
+    console.print("   [bold]JSESSIONID[/bold].")
+    console.print("4. Paste them below (they are only saved to your cookie file).")
+    li_at = typer.prompt("li_at cookie value", hide_input=True)
+    jsessionid = typer.prompt("JSESSIONID cookie value", hide_input=True)
+    if not li_at.strip() or not jsessionid.strip():
+        raise typer.BadParameter("cookie values cannot be empty")
+    payload = {"li_at": li_at.strip(), "JSESSIONID": jsessionid.strip()}
+    try:
+        Path(cookie_file).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    except OSError as exc:
+        raise typer.BadParameter(f"could not write cookie file: {exc}") from None
+    console.print(f"[green]Session cookies saved to {cookie_file}[/green]")

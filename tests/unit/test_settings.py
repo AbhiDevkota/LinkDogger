@@ -19,6 +19,7 @@ def clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "LINKEDIN_EMAIL",
         "LINKEDIN_PASSWORD",
         "LINKEDIN_COOKIES_DIR",
+        "LINKEDIN_COOKIE_FILE",
     ):  # noqa: E501
         monkeypatch.delenv(f"LINKDOGGER_{key}", raising=False)
 
@@ -36,6 +37,7 @@ def test_defaults() -> None:
     assert settings.linkedin_email is None
     assert settings.linkedin_password is None
     assert settings.linkedin_cookies_dir is None
+    assert settings.linkedin_cookie_file is None
 
 
 def test_environment_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -47,6 +49,7 @@ def test_environment_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LINKDOGGER_LINKEDIN_EMAIL", "me@acme.com")
     monkeypatch.setenv("LINKDOGGER_LINKEDIN_PASSWORD", "secret")
     monkeypatch.setenv("LINKDOGGER_LINKEDIN_COOKIES_DIR", "cookies/")
+    monkeypatch.setenv("LINKDOGGER_LINKEDIN_COOKIE_FILE", "linkedin-cookies.json")
     monkeypatch.setenv("LINKDOGGER_GITHUB_EMAIL_PATCH_TIMEOUT_SECONDS", "0")
 
     settings = Settings(_env_file=None)
@@ -58,6 +61,7 @@ def test_environment_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.linkedin_email == "me@acme.com"
     assert settings.linkedin_password == "secret"
     assert settings.linkedin_cookies_dir == "cookies/"
+    assert settings.linkedin_cookie_file == "linkedin-cookies.json"
     assert settings.github_email_patch_timeout_seconds == 0
 
 

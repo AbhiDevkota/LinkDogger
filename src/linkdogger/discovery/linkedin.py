@@ -59,6 +59,7 @@ class LinkedInCompanyDiscoverer(CompanyDiscoverer):
         self._email = settings.linkedin_email
         self._password = settings.linkedin_password
         self._cookies_dir = settings.linkedin_cookies_dir
+        self._cookie_file = settings.linkedin_cookie_file
 
     def resolve_company(self, query: str) -> Company | None:
         if not query.strip():
@@ -83,7 +84,9 @@ class LinkedInCompanyDiscoverer(CompanyDiscoverer):
 
     def _client_or_none(self) -> Any | None:
         try:
-            return get_linkedin_client(self._email, self._password, self._cookies_dir)
+            return get_linkedin_client(
+                self._email, self._password, self._cookies_dir, self._cookie_file
+            )
         except SourceUnavailableError as exc:
             logger.info("LinkedIn API unavailable; using slug fallback: %s", exc)
             return None
@@ -128,10 +131,13 @@ class LinkedInPeopleDiscoverer(PeopleDiscoverer):
         self._email = settings.linkedin_email
         self._password = settings.linkedin_password
         self._cookies_dir = settings.linkedin_cookies_dir
+        self._cookie_file = settings.linkedin_cookie_file
         self._limit = settings.max_results
 
     def discover_people(self, company: Company) -> list[PersonProfile]:
-        client = get_linkedin_client(self._email, self._password, self._cookies_dir)
+        client = get_linkedin_client(
+            self._email, self._password, self._cookies_dir, self._cookie_file
+        )
         results = self._search(client, company)
         people = []
         for item in results:
