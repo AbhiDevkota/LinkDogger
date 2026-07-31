@@ -1,8 +1,8 @@
 """LinkedIn enricher behavior.
 
-The real ``linkedin-scraper`` package is an optional dependency (it
-requires Playwright + a Chromium download), so these tests inject a fake
-module via ``sys.modules`` to exercise LinkDogger's own logic.
+The real ``open-linkedin-api`` package makes live network calls, so
+these tests inject a fake module via ``sys.modules`` to exercise
+LinkDogger's own logic.
 """
 
 import sys
@@ -13,7 +13,6 @@ import pytest
 from linkdogger.enrichment.linkedin import LinkedInEnricher
 from linkdogger.errors import (
     EnrichmentIncompleteError,
-    RateLimitError,
     SourceUnavailableError,
 )
 from linkdogger.models.person import PersonProfile
@@ -22,91 +21,82 @@ from linkdogger.models.social import SocialProfile
 PERSON_URL = "https://www.linkedin.com/in/alice-example"
 
 
-class FakeAuthenticationError(Exception):
+class FakeChallengeError(Exception):
     pass
 
 
-class FakeRateLimitError(Exception):
+class FakeUnauthorizedError(Exception):
     pass
 
 
-class FakeProfileNotFoundError(Exception):
+class FakeSessionExpired(Exception):
     pass
 
 
-class FakePerson:
-    def __init__(self, **kwargs) -> None:
-        self.name = kwargs.get("name", "Alice Example")
-        self.headline = kwargs.get("headline", "Engineer at Acme")
-        self.location = kwargs.get("location", "Berlin, Germany")
-        self.about = kwargs.get("about", "Loves Go.")
-        self.linkedin_url = PERSON_URL
+class FakeClient:
+    profiles: dict[str, dict] = {}
+    contacts: dict[str, dict] = {}
+    errors: list[Exception] = []
+    calls: list[tuple[str, str | None, str | None]] = []
+
+    def get_profile(self, public_id=None, urn_id=None):
+        FakeClient.calls.append(("profile", public_id, urn_id))
+        if FakeClient.errors:
+            raise FakeClient.errors.pop(0)
+        return FakeClient.profiles.get(public_id or urn_id, {})
+
+    def get_profile_contact_info(self, public_id=None, urn_id=None):
+        FakeClient.calls.append(("contact", public_id, urn_id))
+        return FakeClient.contacts.get(public_id or urn_id, {})
 
 
-class FakeState:
-    """Shared state for the fake scraper; set by each test."""
+class FakeLinkedin(FakeClient):
+    instances: list[dict] = []
+    errors: list[Exception] = []
 
-    error: Exception | None = None
-    person: FakePerson | None = None
-
-
-class FakeBrowserManager:
-    launched: list["FakeBrowserManager"] = []
-
-    def __init__(self, headless: bool = True, **launch_options) -> None:
-        self.headless = headless
-        self.launch_options = launch_options
-        self.page = None
-        self.context = _FakeContext()
-        self.init_scripts: list[str] = []
-        FakeBrowserManager.launched.append(self)
-
-    async def __aenter__(self) -> "FakeBrowserManager":
-        return self
-
-    async def __aexit__(self, *exc_info) -> None:
-        return None
-
-    async def load_session(self, path: str) -> None:
-        self.loaded = path
-
-    async def save_session(self, path: str) -> None:
-        self.saved = path
+    def __init__(
+        self,
+        username: str,
+        password: str,
+        *,
+        authenticate: bool = True,
+        refresh_cookies: bool = False,
+        cookies_dir: str = "",
+    ) -> None:
+        FakeLinkedin.instances.append(
+            {
+                "username": username,
+                "password": password,
+                "authenticate": authenticate,
+                "refresh_cookies": refresh_cookies,
+                "cookies_dir": cookies_dir,
+            }
+        )
+        if FakeLinkedin.errors:
+            raise FakeLinkedin.errors.pop(0)
 
 
-class _FakeContext:
-    def __init__(self) -> None:
-        self.init_scripts: list[str] = []
-
-    async def add_init_script(self, script: str) -> None:
-        self.init_scripts.append(script)
-
-
-class FakePersonScraper:
-    def __init__(self, page, callback=None) -> None:
-        self.page = page
-        self.callback = callback
-        self.urls: list[str] = []
-
-    async def scrape(self, url: str):
-        self.urls.append(url)
-        if FakeState.error is not None:
-            raise FakeState.error
-        return FakeState.person or FakePerson()
-
-
-def _install_fake_linkedin_scraper(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = types.ModuleType("linkedin_scraper")
-    module.AuthenticationError = FakeAuthenticationError
-    module.RateLimitError = FakeRateLimitError
-    module.ProfileNotFoundError = FakeProfileNotFoundError
-    module.PersonScraper = FakePersonScraper
-    module.BrowserManager = FakeBrowserManager
-    module.wait_for_manual_login = lambda *a, **k: None
-    monkeypatch.setitem(sys.modules, "linkedin_scraper", module)
-    FakeState.error = None
-    FakeState.person = None
-    FakeBrowserManager.launched = []
+def _install_fake_linkedin_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    package = types.ModuleType("open_linkedin_api")
+    client_module = types.ModuleType("open_linkedin_api.client")
+    client_module.ChallengeException = FakeChallengeError
+    client_module.UnauthorizedException = FakeUnauthorizedError
+    repository_module = types.ModuleType("open_linkedin_api.cookie_repository")
+    repository_module.LinkedinSessionExpired = FakeSessionExpired
+    package.client = client_module
+    package.cookie_repository = repository_module
+    package.Linkedin = FakeLinkedin
+    monkeypatch.setitem(sys.modules, "open_linkedin_api", package)
+    monkeypatch.setitem(sys.modules, "open_linkedin_api.client", client_module)
+    monkeypatch.setitem(
+        sys.modules, "open_linkedin_api.cookie_repository", repository_module
+    )
+    FakeClient.profiles = {}
+    FakeClient.contacts = {}
+    FakeClient.errors = []
+    FakeClient.calls = []
+    FakeLinkedin.instances = []
+    FakeLinkedin.errors = []
 
 
 def _person_with_linkedin() -> PersonProfile:
@@ -125,56 +115,83 @@ def _person_with_linkedin() -> PersonProfile:
     )
 
 
-def _session_file(tmp_path) -> str:
-    session = tmp_path / "session.json"
-    session.write_text("{}")
-    return str(session)
+def _person_with_urn(username: str = "123456") -> PersonProfile:
+    return PersonProfile(
+        name="Bob",
+        company="Acme",
+        profiles={
+            "linkedin": SocialProfile(
+                platform="linkedin",
+                url=None,
+                username=username,
+                source="linkedin-api",
+                confidence=0.7,
+            )
+        },
+        sources=["linkedin-api"],
+    )
 
 
-def test_unavailable_without_session_file(monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_fake_linkedin_scraper(monkeypatch)
+def _alice_profile_data() -> dict:
+    return {
+        "firstName": "Alice",
+        "lastName": "Example",
+        "headline": "Engineer at Acme",
+        "locationName": "Berlin, Germany",
+        "summary": "Loves Go.",
+        "public_id": "alice-example",
+    }
+
+
+def test_unavailable_without_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_linkedin_api(monkeypatch)
     enricher = LinkedInEnricher()
-    with pytest.raises(SourceUnavailableError, match="session file"):
+    with pytest.raises(SourceUnavailableError, match="credentials"):
         enricher.enrich_all([_person_with_linkedin()])
 
 
 def test_unavailable_when_library_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(sys.modules, "linkedin_scraper", None)
+    monkeypatch.setitem(sys.modules, "open_linkedin_api", None)
     enricher = LinkedInEnricher()
     with pytest.raises(SourceUnavailableError, match="not installed"):
         enricher.enrich_all([_person_with_linkedin()])
 
 
-def test_people_without_linkedin_url_are_left_alone(
+def test_people_without_linkedin_profile_are_left_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_linkedin_scraper(monkeypatch)
+    _install_fake_linkedin_api(monkeypatch)
     enricher = LinkedInEnricher()
     person = PersonProfile(name="Bob", company="Acme", sources=["mock-sample-data"])
     assert enricher.enrich_all([person]) == [person]
+    assert FakeLinkedin.instances == []
 
 
-def test_enriches_person_with_scraped_data(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+def test_enriches_person_with_profile_data(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_linkedin_scraper(monkeypatch)
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.profiles["alice-example"] = _alice_profile_data()
     enricher = LinkedInEnricher()
-    enricher._session_file = _session_file(tmp_path)  # noqa: SLF001
-    person = _person_with_linkedin()
-    result = enricher.enrich_all([person])
+    enricher._email = "alice@acme.com"  # noqa: SLF001
+    enricher._password = "secret"  # noqa: SLF001
+    result = enricher.enrich_all([_person_with_linkedin()])
     assert result[0].name == "Alice"  # name already known, not overwritten
     assert result[0].position == "Engineer at Acme"
     assert result[0].location == "Berlin, Germany"
     assert result[0].bio == "Loves Go."
-    assert "linkedin-scraper" in result[0].sources
+    assert "linkedin-api" in result[0].sources
+    assert result[0].profiles["linkedin"].username == "alice-example"
 
 
 def test_existing_data_is_not_overwritten(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_linkedin_scraper(monkeypatch)
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.profiles["alice-example"] = _alice_profile_data()
     enricher = LinkedInEnricher()
-    enricher._session_file = _session_file(tmp_path)  # noqa: SLF001
+    enricher._email = "a@b.c"  # noqa: SLF001
+    enricher._password = "secret"  # noqa: SLF001
     person = _person_with_linkedin()
     person.position = "Known Position"
     person.bio = "Known bio"
@@ -183,66 +200,160 @@ def test_existing_data_is_not_overwritten(
     assert result[0].bio == "Known bio"
 
 
-def test_session_file_is_loaded_from_settings(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+def test_email_from_contact_info_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.profiles["alice-example"] = _alice_profile_data()
+    FakeClient.contacts["alice-example"] = {"email_address": "alice@acme.com"}
+    enricher = LinkedInEnricher()
+    enricher._email = "a@b.c"  # noqa: SLF001
+    enricher._password = "secret"  # noqa: SLF001
+    result = enricher.enrich_all([_person_with_linkedin()])
+    assert result[0].email == "alice@acme.com"
+    assert ("contact", "alice-example", None) in FakeClient.calls
+
+
+def test_existing_email_not_overwritten(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.profiles["alice-example"] = _alice_profile_data()
+    enricher = LinkedInEnricher()
+    enricher._email = "a@b.c"  # noqa: SLF001
+    enricher._password = "secret"  # noqa: SLF001
+    person = _person_with_linkedin()
+    person.email = "known@acme.com"
+    enricher.enrich_all([person])
+    assert FakeClient.calls == [("profile", "alice-example", None)]
+
+
+def test_credentials_are_taken_from_settings(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from linkdogger.config.settings import Settings
 
-    _install_fake_linkedin_scraper(monkeypatch)
-    settings = Settings(_env_file=None, linkedin_session_file=_session_file(tmp_path))
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.profiles["alice-example"] = _alice_profile_data()
+    settings = Settings(
+        _env_file=None,
+        linkedin_email="me@acme.com",
+        linkedin_password="pw",
+        linkedin_cookies_dir="cookies/",
+    )
     enricher = LinkedInEnricher(settings)
+    enricher.enrich_all([_person_with_linkedin()])
+    assert FakeLinkedin.instances[0]["username"] == "me@acme.com"
+    assert FakeLinkedin.instances[0]["password"] == "pw"
+    assert FakeLinkedin.instances[0]["cookies_dir"] == "cookies/"
+
+
+def test_expired_cookies_trigger_relogin(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeLinkedin.errors = [FakeSessionExpired("expired")]
+    FakeClient.profiles["alice-example"] = _alice_profile_data()
+    enricher = LinkedInEnricher()
+    enricher._email = "a@b.c"  # noqa: SLF001
+    enricher._password = "secret"  # noqa: SLF001
     result = enricher.enrich_all([_person_with_linkedin()])
     assert result[0].position == "Engineer at Acme"
+    assert len(FakeLinkedin.instances) == 2
+    assert FakeLinkedin.instances[1]["refresh_cookies"] is True
 
 
-def test_browser_is_launched_with_anti_detection_options(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+def test_auth_challenge_raises_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_linkedin_scraper(monkeypatch)
+    _install_fake_linkedin_api(monkeypatch)
+    FakeLinkedin.errors = [FakeChallengeError("CAPTCHA_CHALLENGE")]
     enricher = LinkedInEnricher()
-    enricher._session_file = _session_file(tmp_path)  # noqa: SLF001
-    result = enricher.enrich_all([_person_with_linkedin()])
-    assert result[0].position == "Engineer at Acme"
-    last_manager = FakeBrowserManager.launched[-1]  # type: ignore[attr-defined]
-    assert last_manager.launch_options["channel"] == "chrome"
-    launched_args = last_manager.launch_options["args"]
-    assert "--disable-blink-features=AutomationControlled" in launched_args
-    assert any("webdriver" in s for s in last_manager.context.init_scripts)
-
-
-def test_auth_error_raises_unavailable(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _install_fake_linkedin_scraper(monkeypatch)
-    FakeState.error = FakeAuthenticationError("expired")
-    enricher = LinkedInEnricher()
-    enricher._session_file = _session_file(tmp_path)  # noqa: SLF001
-    with pytest.raises(SourceUnavailableError, match="session expired"):
+    enricher._email = "a@b.c"  # noqa: SLF001
+    enricher._password = "secret"  # noqa: SLF001
+    with pytest.raises(SourceUnavailableError, match="challenge"):
         enricher.enrich_all([_person_with_linkedin()])
 
 
-def test_rate_limit_propagates(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _install_fake_linkedin_scraper(monkeypatch)
-    FakeState.error = FakeRateLimitError("slow down")
+def test_unauthorized_raises_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeLinkedin.errors = [FakeUnauthorizedError()]
     enricher = LinkedInEnricher()
-    enricher._session_file = _session_file(tmp_path)  # noqa: SLF001
-    with pytest.raises(RateLimitError):
+    enricher._email = "a@b.c"  # noqa: SLF001
+    enricher._password = "wrong"  # noqa: SLF001
+    with pytest.raises(SourceUnavailableError, match="rejected"):
         enricher.enrich_all([_person_with_linkedin()])
 
 
 def test_profile_not_found_is_partial(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_linkedin_scraper(monkeypatch)
-    FakeState.error = FakeProfileNotFoundError("gone")
+    _install_fake_linkedin_api(monkeypatch)
     enricher = LinkedInEnricher()
-    enricher._session_file = _session_file(tmp_path)  # noqa: SLF001
+    enricher._email = "a@b.c"  # noqa: SLF001
+    enricher._password = "secret"  # noqa: SLF001
     with pytest.raises(EnrichmentIncompleteError, match="skipped"):
         enricher.enrich_all([_person_with_linkedin()])
 
 
+def test_per_person_failure_is_isolated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.profiles["alice-example"] = _alice_profile_data()
+    FakeClient.profiles["123456"] = {
+        "firstName": "Bob",
+        "lastName": "Smith",
+        "headline": "Engineer at Acme",
+    }
+    FakeClient.errors = [RuntimeError("boom")]
+    enricher = LinkedInEnricher()
+    enricher._email = "a@b.c"  # noqa: SLF001
+    enricher._password = "secret"  # noqa: SLF001
+    people = [_person_with_linkedin(), _person_with_urn("123456")]
+    with pytest.raises(EnrichmentIncompleteError, match="skipped"):
+        enricher.enrich_all(people)
+    assert people[1].position == "Engineer at Acme"
+
+
+def test_urn_based_username_is_used(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.profiles["123456"] = {
+        "firstName": "Bob",
+        "lastName": "Smith",
+        "headline": "CTO at Acme",
+    }
+    enricher = LinkedInEnricher()
+    enricher._email = "a@b.c"  # noqa: SLF001
+    enricher._password = "secret"  # noqa: SLF001
+    result = enricher.enrich_all([_person_with_urn()])
+    assert FakeClient.calls[0] == ("profile", None, "123456")
+    assert result[0].position == "CTO at Acme"
+    assert "linkedin-api" in result[0].sources
+
+
+def test_auth_error_mid_run_raises_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.profiles["alice-example"] = _alice_profile_data()
+    FakeClient.errors = [
+        RuntimeError("boom"),
+        FakeChallengeError("CAPTCHA_CHALLENGE"),
+    ]
+    enricher = LinkedInEnricher()
+    enricher._email = "a@b.c"  # noqa: SLF001
+    enricher._password = "secret"  # noqa: SLF001
+    with pytest.raises(SourceUnavailableError, match="session ended"):
+        enricher.enrich_all([_person_with_linkedin(), _person_with_urn("123456")])
+
+
 def test_enrichment_pipeline_marks_linkedin_status(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """End-to-end: a service with the enricher reports linkedin status."""
     from linkdogger.config.settings import Settings
@@ -250,8 +361,19 @@ def test_enrichment_pipeline_marks_linkedin_status(
     from linkdogger.enrichment.social import XEnricher
     from linkdogger.services.people_service import PeopleService
 
-    _install_fake_linkedin_scraper(monkeypatch)
-    settings = Settings(_env_file=None, linkedin_session_file=_session_file(tmp_path))
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.profiles["alex-sample"] = _alice_profile_data()
+    FakeClient.profiles["jordan-sample"] = {
+        "firstName": "Jordan",
+        "lastName": "Sample",
+        "headline": "Product Designer",
+    }
+    FakeClient.contacts["jordan-sample"] = {"email_address": "jordan@acme.com"}
+    settings = Settings(
+        _env_file=None,
+        linkedin_email="me@acme.com",
+        linkedin_password="pw",
+    )
     service = PeopleService(
         settings,
         MockCompanyDiscoverer(),
@@ -263,4 +385,6 @@ def test_enrichment_pipeline_marks_linkedin_status(
     assert result.source_status["linkedin"] == "ok"
     enriched = [p for p in result.results if "linkedin" in p.profiles]
     assert enriched
-    assert all("linkedin-scraper" in p.sources for p in enriched)
+    assert all("linkedin-api" in p.sources for p in enriched)
+    jordan = next(p for p in result.results if p.name == "Jordan Sample")
+    assert jordan.email == "jordan@acme.com"

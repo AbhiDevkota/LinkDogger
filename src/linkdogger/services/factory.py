@@ -3,10 +3,11 @@
 Both interfaces (CLI and web) build their ``PeopleService`` here so the
 exact same business logic is shared. Provider selection:
 
-* ``linkedin`` (CLI default): LinkedIn company resolution + LinkedIn
-  profile enrichment. Honest limitation: LinkedIn exposes no employee
-  directory, so people discovery from LinkedIn alone yields no people
-  yet — use ``hybrid`` for discovery through public GitHub data.
+* ``linkedin`` (CLI default): LinkedIn company resolution + people
+  discovery + profile enrichment through your own LinkedIn account
+  (``open-linkedin-api``; credentials via env vars). Without
+  credentials, company resolution falls back to slug URLs and people
+  discovery honestly reports ``unavailable``.
 * ``github``: official GitHub API (public data only, rate limits
   respected).
 * ``hybrid``: GitHub discovery + enrichment from both GitHub and

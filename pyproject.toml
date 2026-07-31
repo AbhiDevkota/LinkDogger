@@ -27,8 +27,10 @@ dev = [
     "mypy>=1.14",
 ]
 linkedin = [
-    "linkedin-scraper>=3.0",
-    "playwright>=1.40",
+    # NOTE: open-linkedin-api pins `lxml<6.0.0`, which has no Python 3.14
+    # wheels yet. On 3.14 install with `--no-deps` and rely on lxml>=6 +
+    # beautifulsoup4 (see README).
+    "open-linkedin-api>=2.3.1",
 ]
 
 [project.scripts]
@@ -62,7 +64,7 @@ disallow_untyped_defs = true
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["linkedin_scraper.*"]
+module = ["open_linkedin_api.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

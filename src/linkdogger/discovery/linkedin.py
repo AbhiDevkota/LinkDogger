@@ -1,32 +1,43 @@
 """LinkedIn discovery.
 
-LinkedIn offers no official public API for reading profiles or company
-data without authentication. LinkDogger's LinkedIn provider uses the
-optional ``linkedin-scraper`` library (a Playwright-based scraper) with a
-user-created, authenticated session. Everything stays opt-in: no session
-file means no LinkedIn access, and no data is ever guessed or fabricated.
+LinkedIn offers no official public API without authentication. LinkDogger's
+LinkedIn provider uses the optional ``open-linkedin-api`` library (a
+synchronous client for LinkedIn's Voyager API) with your own account
+credentials. Everything stays opt-in: no credentials means no LinkedIn
+access, and no data is ever guessed or fabricated.
 
-Current capability gap, stated honestly: LinkedIn does not expose an
-employee directory to third-party tools, so discovering people purely
-from LinkedIn is not possible yet. Use ``--provider github`` or
-``--provider hybrid`` for people discovery; LinkedIn is used for
-company resolution and profile enrichment.
+With credentials the provider can now do full LinkedIn discovery:
+
+* companies resolve through ``search_companies`` (the real company name
+  and its URN id, which people search filters on);
+* people are discovered through ``search_people``, filtered to the
+  company's URN id when available (the library respects LinkedIn's rate
+  limits by sleeping between requests).
+
+Without credentials, company resolution falls back to the slug-derived
+URL (honestly marked ``linkedin-slug``) and people discovery reports
+``unavailable`` instead of fabricating profiles.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from typing import Any
 
 from linkdogger.config.settings import Settings
 from linkdogger.discovery.base import CompanyDiscoverer, PeopleDiscoverer
 from linkdogger.errors import SourceUnavailableError
+from linkdogger.linkedin_api import get_linkedin_client
 from linkdogger.models.company import Company
 from linkdogger.models.person import PersonProfile
+from linkdogger.models.social import SocialProfile
 
 logger = logging.getLogger(__name__)
 
 COMPANY_SLUG_PATTERN = re.compile(r"[^a-z0-9]+")
+
+SOURCE = "linkedin-api"
 
 
 def _company_slug(query: str) -> str:
@@ -38,15 +49,16 @@ def _company_slug(query: str) -> str:
 class LinkedInCompanyDiscoverer(CompanyDiscoverer):
     """Resolves companies to LinkedIn company pages.
 
-    The LinkedIn URL for a company follows the ``/company/{slug}/``
-    pattern. When a session is configured, the page is verified with
-    ``CompanyScraper``; without a session the slug is used as-is (the
-    resulting URL is marked with an honest ``linkedin-slug`` source).
+    With credentials, ``search_companies`` finds the real company
+    (including its URN id, which people search uses as a filter);
+    without credentials — or when the API fails — the slug-derived URL
+    is used as-is, honestly marked with the ``linkedin-slug`` source.
     """
 
     def __init__(self, settings: Settings) -> None:
-        self._session_file = settings.linkedin_session_file
-        self._headless = settings.linkedin_headless
+        self._email = settings.linkedin_email
+        self._password = settings.linkedin_password
+        self._cookies_dir = settings.linkedin_cookies_dir
 
     def resolve_company(self, query: str) -> Company | None:
         if not query.strip():
@@ -55,12 +67,13 @@ class LinkedInCompanyDiscoverer(CompanyDiscoverer):
         if not slug:
             return None
 
-        url = f"https://www.linkedin.com/company/{slug}/"
-        if self._session_file:
-            verified = self._verify_company(url)
-            if verified:
-                return verified
-        logger.info("LinkedIn company URL (slug, unverified): %s", url)
+        client = self._client_or_none()
+        if client is not None:
+            resolved = self._resolve_with_api(client, query, slug)
+            if resolved is not None:
+                return resolved
+
+        logger.info("LinkedIn company URL (slug, unverified): %s", slug)
         return Company(
             name=query.strip(),
             aliases=[slug],
@@ -68,90 +81,94 @@ class LinkedInCompanyDiscoverer(CompanyDiscoverer):
             resolved_from=query,
         )
 
-    def _verify_company(self, url: str) -> Company | None:
+    def _client_or_none(self) -> Any | None:
         try:
-            import asyncio
-
-            import linkedin_scraper  # noqa: F401 - availability check
-        except ImportError:
-            logger.warning(
-                "linkedin-scraper not installed; company URL stays unverified "
-                "(install with `pip install -e '.[linkedin]'`)"
-            )
-            return None
-
-        try:
-
-            async def scrape() -> Company | None:
-                from linkedin_scraper import BrowserManager, CompanyScraper
-
-                from linkdogger.enrichment.linkedin import (
-                    hide_automation_flags,
-                    linkedin_launch_options,
-                )
-
-                # LinkedIn's WAF often blocks headless browsing outright
-                # (net::ERR_HTTP_RESPONSE_CODE_FAILURE); your own session is
-                # trusted when the browser is visible, so retry headed once.
-                attempts = [False]
-                if self._headless:
-                    attempts.insert(0, self._headless)
-                last_block: Exception | None = None
-                for headless in attempts:
-                    try:
-                        async with BrowserManager(
-                            headless=headless, **linkedin_launch_options()
-                        ) as browser:
-                            await browser.load_session(self._session_file)
-                            await hide_automation_flags(browser)
-                            scraper = CompanyScraper(browser.page)
-                            company = await scraper.scrape(url)
-                            return Company(
-                                name=company.name,
-                                aliases=[company.name.lower().replace(" ", "-")],
-                                description=getattr(company, "about", None),
-                                source="linkedin-scraper",
-                                resolved_from=url,
-                            )
-                    except Exception as exc:  # noqa: BLE001 - retry block headed
-                        if "ERR_HTTP_RESPONSE_CODE_FAILURE" not in str(exc):
-                            raise
-                        last_block = exc
-                        logger.warning(
-                            "Company page blocked with headless=%s (%s); "
-                            "retrying once with a visible browser",
-                            headless,
-                            exc,
-                        )
-                assert last_block is not None
-                raise last_block
-
-            return asyncio.run(scrape())
+            return get_linkedin_client(self._email, self._password, self._cookies_dir)
         except SourceUnavailableError as exc:
-            logger.warning("LinkedIn company verification unavailable: %s", exc)
+            logger.info("LinkedIn API unavailable; using slug fallback: %s", exc)
             return None
-        except Exception as exc:  # noqa: BLE001 - scraper raises many error types
-            logger.warning("LinkedIn company verification failed: %s", exc)
-            return None
+
+    def _resolve_with_api(self, client: Any, query: str, slug: str) -> Company | None:
+        try:
+            results = client.search_companies(keywords=[query])
+            if results:
+                first = results[0]
+                aliases: list[str] = [slug]
+                if first.get("urn_id"):
+                    aliases.insert(0, first["urn_id"])
+                return Company(
+                    name=first.get("name") or query.strip(),
+                    aliases=aliases,
+                    description=first.get("headline") or first.get("subline"),
+                    source=SOURCE,
+                    resolved_from=query,
+                )
+            company = client.get_company(slug)
+            if company:
+                return Company(
+                    name=company.get("name") or query.strip(),
+                    aliases=[slug],
+                    description=company.get("description"),
+                    source=SOURCE,
+                    resolved_from=query,
+                )
+        except Exception as exc:  # noqa: BLE001 - search failures are varied
+            logger.warning("LinkedIn company resolution failed: %s", exc)
+        return None
 
 
 class LinkedInPeopleDiscoverer(PeopleDiscoverer):
-    """Reports that LinkedIn cannot provide people discovery.
+    """Discovers people at a company through LinkedIn's people search.
 
-    LinkedIn has no public employee-directory API, and the scraper can
-    only read pages you navigate it to. Discovering people purely from
-    LinkedIn is therefore not implemented: raising
-    ``SourceUnavailableError`` here keeps the search honest instead of
-    fabricating or guessing profiles.
+    Without credentials this source honestly reports ``unavailable``
+    (the previous behavior) instead of guessing.
     """
 
     def __init__(self, settings: Settings) -> None:
-        self._session_file = settings.linkedin_session_file
+        self._email = settings.linkedin_email
+        self._password = settings.linkedin_password
+        self._cookies_dir = settings.linkedin_cookies_dir
+        self._limit = settings.max_results
 
     def discover_people(self, company: Company) -> list[PersonProfile]:
-        raise SourceUnavailableError(
-            "LinkedIn does not expose employee directories to third-party "
-            "tools; people discovery from LinkedIn is not available. "
-            "Use `--provider github` or `--provider hybrid` to discover "
-            "people through public GitHub data."
-        )
+        client = get_linkedin_client(self._email, self._password, self._cookies_dir)
+        results = self._search(client, company)
+        people = []
+        for item in results:
+            name = item.get("name")
+            if not name:
+                continue
+            username = item.get("urn_id")
+            people.append(
+                PersonProfile(
+                    name=name,
+                    position=item.get("jobtitle"),
+                    location=item.get("location"),
+                    profiles={
+                        "linkedin": SocialProfile(
+                            platform="linkedin",
+                            url=None,
+                            username=username,
+                            source=SOURCE,
+                            confidence=0.7,
+                        )
+                    },
+                    sources=[SOURCE],
+                )
+            )
+        logger.info("LinkedIn people search returned %d profile(s)", len(people))
+        return people
+
+    def _search(self, client: Any, company: Company) -> list[dict[str, Any]]:
+        urn_id = _company_urn_id(company)
+        if urn_id is not None:
+            return client.search_people(current_company=[urn_id], limit=self._limit)
+        return client.search_people(keywords=company.name, limit=self._limit)
+
+
+def _company_urn_id(company: Company) -> str | None:
+    """The URN id from resolved companies (first alias, when numeric)."""
+    for alias in company.aliases:
+        if alias.isdigit():
+            return alias
+    return None

@@ -21,7 +21,11 @@ def test_factory_builds_github_backend_service() -> None:
 
 def test_factory_builds_linkedin_provider_service() -> None:
     service = build_people_service(
-        Settings(_env_file=None, linkedin_session_file="session.json"),
+        Settings(
+            _env_file=None,
+            linkedin_email="me@acme.com",
+            linkedin_password="pw",
+        ),
         provider="linkedin",
     )
     assert service is not None

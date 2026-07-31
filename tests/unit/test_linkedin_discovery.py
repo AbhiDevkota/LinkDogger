@@ -14,75 +14,100 @@ from linkdogger.errors import SourceUnavailableError
 from linkdogger.models.company import Company
 
 
-class FakeCompany:
-    def __init__(self, name: str = "OpenAI", about: str | None = None) -> None:
-        self.name = name
-        if about is not None:
-            self.about = about
-
-
-class FakeBrowserManager:
-    launched: list["FakeBrowserManager"] = []
-
-    def __init__(self, headless: bool = True, **launch_options) -> None:
-        self.headless = headless
-        self.launch_options = launch_options
-        self.page = None
-        self.context = _FakeContext()
-        FakeBrowserManager.launched.append(self)
-
-    async def __aenter__(self) -> "FakeBrowserManager":
-        return self
-
-    async def __aexit__(self, *exc_info) -> None:
-        return None
-
-    async def load_session(self, path: str) -> None:
-        self.loaded = path
-
-
-class _FakeContext:
-    def __init__(self) -> None:
-        self.init_scripts: list[str] = []
-
-    async def add_init_script(self, script: str) -> None:
-        self.init_scripts.append(script)
-
-
-class FakeCompanyScraper:
+class FakeClient:
+    companies: list[dict] = []
+    company: dict | None = None
+    people: list[dict] = []
     errors: list[Exception] = []
-    company: FakeCompany | None = None
-    calls = 0
+    company_search_calls: list[list[str]] = []
+    company_lookups: list[str] = []
+    people_search_calls: list[dict] = []
 
-    def __init__(self, page, callback=None) -> None:
-        self.page = page
+    def search_companies(self, keywords=None, **kwargs):
+        FakeClient.company_search_calls.append(keywords or [])
+        if FakeClient.errors:
+            raise FakeClient.errors.pop(0)
+        return FakeClient.companies
 
-    async def scrape(self, url: str):
-        FakeCompanyScraper.calls += 1
-        if FakeCompanyScraper.errors:
-            raise FakeCompanyScraper.errors.pop(0)
-        return FakeCompanyScraper.company or FakeCompany()
+    def get_company(self, public_id):
+        FakeClient.company_lookups.append(public_id)
+        return FakeClient.company
+
+    def search_people(self, keywords=None, current_company=None, limit=-1, **kwargs):
+        FakeClient.people_search_calls.append(
+            {
+                "keywords": keywords,
+                "current_company": current_company,
+                "limit": limit,
+            }
+        )
+        return FakeClient.people
 
 
-def _install_fake_linkedin_scraper(monkeypatch: pytest.MonkeyPatch) -> None:
-    module = types.ModuleType("linkedin_scraper")
-    module.CompanyScraper = FakeCompanyScraper
-    module.BrowserManager = FakeBrowserManager
-    monkeypatch.setitem(sys.modules, "linkedin_scraper", module)
-    FakeCompanyScraper.errors = []
-    FakeCompanyScraper.company = None
-    FakeCompanyScraper.calls = 0
-    FakeBrowserManager.launched = []
+class FakeLinkedin(FakeClient):
+    instances: list[dict] = []
+
+    def __init__(
+        self,
+        username: str,
+        password: str,
+        *,
+        authenticate: bool = True,
+        refresh_cookies: bool = False,
+        cookies_dir: str = "",
+    ) -> None:
+        FakeLinkedin.instances.append(
+            {
+                "username": username,
+                "password": password,
+                "cookies_dir": cookies_dir,
+            }
+        )
+
+
+def _install_fake_linkedin_api(monkeypatch: pytest.MonkeyPatch) -> None:
+    package = types.ModuleType("open_linkedin_api")
+    client_module = types.ModuleType("open_linkedin_api.client")
+    client_module.ChallengeException = Exception
+    client_module.UnauthorizedException = Exception
+    repository_module = types.ModuleType("open_linkedin_api.cookie_repository")
+    repository_module.LinkedinSessionExpired = Exception
+    package.client = client_module
+    package.cookie_repository = repository_module
+    package.Linkedin = FakeLinkedin
+    monkeypatch.setitem(sys.modules, "open_linkedin_api", package)
+    monkeypatch.setitem(sys.modules, "open_linkedin_api.client", client_module)
+    monkeypatch.setitem(
+        sys.modules, "open_linkedin_api.cookie_repository", repository_module
+    )
+    FakeClient.companies = []
+    FakeClient.company = None
+    FakeClient.people = []
+    FakeClient.errors = []
+    FakeClient.company_search_calls = []
+    FakeClient.company_lookups = []
+    FakeClient.people_search_calls = []
 
 
 def _settings(**overrides) -> Settings:
     return Settings(_env_file=None, **overrides)
 
 
-def _session_file(tmp_path) -> str:
-    session = tmp_path / "session.json"
-    session.write_text("{}")
-    return str(session)
+def _creds(**overrides) -> dict:
+    creds = {"linkedin_email": "me@acme.com", "linkedin_password": "pw"}
+    creds.update(overrides)
+    return creds
+
+
+def _company(**overrides) -> Company:
+    data = {
+        "name": "Acme",
+        "aliases": ["acme"],
+        "source": "linkedin-slug",
+        "resolved_from": "acme",
+    }
+    data.update(overrides)
+    return Company(**data)
 
 
 def test_company_resolved_from_query_slug() -> None:
@@ -106,91 +131,125 @@ def test_blank_query_returns_none() -> None:
     assert discoverer.resolve_company("   ") is None
 
 
-def test_people_discovery_reports_unavailable() -> None:
-    discoverer = LinkedInPeopleDiscoverer(_settings())
-    company = Company(
-        name="Acme", aliases=["acme"], source="linkedin-slug", resolved_from="acme"
-    )
-    with pytest.raises(SourceUnavailableError, match="employee directories"):
-        discoverer.discover_people(company)
-
-
-def test_company_verification_with_session_and_about(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+def test_company_resolved_via_search_companies(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_linkedin_scraper(monkeypatch)
-    FakeCompanyScraper.company = FakeCompany(name="OpenAI", about="AGI lab")
-    discoverer = LinkedInCompanyDiscoverer(
-        _settings(linkedin_session_file=_session_file(tmp_path))
-    )
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.companies = [
+        {"urn_id": "1234", "name": "OpenAI", "headline": "AGI lab", "subline": None}
+    ]
+    discoverer = LinkedInCompanyDiscoverer(_settings(**_creds()))
     company = discoverer.resolve_company("OpenAI")
     assert company is not None
     assert company.name == "OpenAI"
     assert company.description == "AGI lab"
-    assert company.source == "linkedin-scraper"
-    last_manager = FakeBrowserManager.launched[-1]  # type: ignore[attr-defined]
-    assert last_manager.launch_options["channel"] == "chrome"
+    assert company.source == "linkedin-api"
+    assert company.aliases == ["1234", "openai"]
+    assert FakeClient.company_search_calls == [["OpenAI"]]
 
 
-def test_company_verification_tolerates_missing_about(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+def test_company_falls_back_to_slug_on_api_error(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_linkedin_scraper(monkeypatch)
-    discoverer = LinkedInCompanyDiscoverer(
-        _settings(linkedin_session_file=_session_file(tmp_path))
-    )
-    company = discoverer.resolve_company("OpenAI")
-    assert company is not None
-    assert company.source == "linkedin-scraper"
-    assert company.description is None
-
-
-def test_company_verification_falls_back_to_slug_on_error(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    _install_fake_linkedin_scraper(monkeypatch)
-    FakeCompanyScraper.errors = [RuntimeError("Locator.inner_text: Timeout")]
-    discoverer = LinkedInCompanyDiscoverer(
-        _settings(linkedin_session_file=_session_file(tmp_path))
-    )
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.errors = [RuntimeError("boom")]
+    discoverer = LinkedInCompanyDiscoverer(_settings(**_creds()))
     company = discoverer.resolve_company("OpenAI")
     assert company is not None
     assert company.source == "linkedin-slug"
+    assert company.aliases == ["openai"]
 
 
-def test_company_verification_retries_blocked_headed(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+def test_company_falls_back_to_get_company_when_search_empty(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_linkedin_scraper(monkeypatch)
-    FakeCompanyScraper.company = FakeCompany(name="OpenAI")
-    FakeCompanyScraper.errors = [
-        RuntimeError("Page.goto: net::ERR_HTTP_RESPONSE_CODE_FAILURE")
-    ]
-    discoverer = LinkedInCompanyDiscoverer(
-        _settings(linkedin_session_file=_session_file(tmp_path))
-    )
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.company = {"name": "OpenAI", "description": "AGI lab"}
+    discoverer = LinkedInCompanyDiscoverer(_settings(**_creds()))
     company = discoverer.resolve_company("OpenAI")
     assert company is not None
-    assert company.source == "linkedin-scraper"
-    assert FakeCompanyScraper.calls == 2
-    attempts = FakeBrowserManager.launched  # type: ignore[attr-defined]
-    assert [m.headless for m in attempts] == [True, False]
+    assert company.source == "linkedin-api"
+    assert company.description == "AGI lab"
+    assert company.aliases == ["openai"]
+    assert FakeClient.company_lookups == ["openai"]
 
 
-def test_headed_verification_does_not_retry(
-    tmp_path, monkeypatch: pytest.MonkeyPatch
+def test_company_without_credentials_skips_api(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_linkedin_scraper(monkeypatch)
-    FakeCompanyScraper.errors = [
-        RuntimeError("Page.goto: net::ERR_HTTP_RESPONSE_CODE_FAILURE")
-    ]
-    discoverer = LinkedInCompanyDiscoverer(
-        _settings(
-            linkedin_session_file=_session_file(tmp_path),
-            linkedin_headless=False,
-        )
-    )
+    _install_fake_linkedin_api(monkeypatch)
+    discoverer = LinkedInCompanyDiscoverer(_settings())
     company = discoverer.resolve_company("OpenAI")
     assert company is not None
     assert company.source == "linkedin-slug"
-    assert FakeCompanyScraper.calls == 1
+    assert FakeClient.company_search_calls == []
+
+
+def test_people_discovery_uses_company_urn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.people = [
+        {
+            "urn_id": "99",
+            "name": "Alice A",
+            "jobtitle": "Engineer",
+            "location": "Berlin",
+        }
+    ]
+    discoverer = LinkedInPeopleDiscoverer(_settings(**_creds()))
+    people = discoverer.discover_people(_company(aliases=["1234", "acme"]))
+    assert len(people) == 1
+    person = people[0]
+    assert person.name == "Alice A"
+    assert person.position == "Engineer"
+    assert person.location == "Berlin"
+    assert person.sources == ["linkedin-api"]
+    linkedin = person.profiles["linkedin"]
+    assert linkedin.username == "99"
+    assert linkedin.url is None
+    assert FakeClient.people_search_calls == [
+        {"keywords": None, "current_company": ["1234"], "limit": 100}
+    ]
+
+
+def test_people_discovery_falls_back_to_keywords(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.people = []
+    discoverer = LinkedInPeopleDiscoverer(_settings(**_creds()))
+    discoverer.discover_people(_company())
+    assert FakeClient.people_search_calls == [
+        {"keywords": "Acme", "current_company": None, "limit": 100}
+    ]
+
+
+def test_people_discovery_requires_credentials() -> None:
+    discoverer = LinkedInPeopleDiscoverer(_settings())
+    with pytest.raises(SourceUnavailableError, match="credentials"):
+        discoverer.discover_people(_company())
+
+
+def test_people_discovery_skips_nameless_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.people = [
+        {"urn_id": "1", "name": "Alice A", "jobtitle": "Engineer"},
+        {"urn_id": "2", "name": None, "jobtitle": "Engineer"},
+    ]
+    discoverer = LinkedInPeopleDiscoverer(_settings(**_creds()))
+    people = discoverer.discover_people(_company(aliases=["1234", "acme"]))
+    assert len(people) == 1
+    assert people[0].name == "Alice A"
+
+
+def test_people_discovery_respects_max_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.people = []
+    discoverer = LinkedInPeopleDiscoverer(_settings(**_creds(max_results=5)))
+    discoverer.discover_people(_company())
+    assert FakeClient.people_search_calls[0]["limit"] == 5

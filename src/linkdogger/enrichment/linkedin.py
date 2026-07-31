@@ -1,194 +1,145 @@
-"""LinkedIn enrichment via the optional ``linkedin-scraper`` library.
+"""LinkedIn enrichment via the optional ``open-linkedin-api`` library.
 
-``linkedin-scraper`` is a Playwright-based scraper (v3+): it opens a
-real browser using your own authenticated LinkedIn session and reads
-profile pages. LinkDogger therefore treats LinkedIn as an *opt-in
-extraction engine*:
+``open-linkedin-api`` is a synchronous HTTP client for LinkedIn's Voyager
+API (the same endpoints the web app uses). It authenticates with your own
+LinkedIn account credentials and caches the session cookies, so LinkDogger
+treats LinkedIn as an *opt-in source*:
 
-* the session is created once, by you (``linkdogger linkedin-login``),
-  in your own browser and saved for reuse;
-* the session file is reused (``load_session``) and never shared;
-* nothing is scraped unless a person already has a known LinkedIn URL
-  (e.g. found in a public GitHub bio);
-* rate limits are respected with a delay between requests and never
-  circumvented; ``RateLimitError`` propagates instead of retrying hard.
+* credentials are provided only by you, via environment variables
+  (``LINKDOGGER_LINKEDIN_EMAIL`` / ``LINKDOGGER_LINKEDIN_PASSWORD``);
+* the library's cookie cache (``LINKDOGGER_LINKEDIN_COOKIES_DIR``) keeps
+  the session alive without re-logging in on every run;
+* the library sleeps 2-5 seconds between requests to respect LinkedIn's
+  rate limits; LinkDogger never attempts to bypass them;
+* nothing is fetched unless a person already has a known LinkedIn
+  profile (e.g. found in a public GitHub bio).
 
-The browser is launched with anti-detection options (real Chrome
-channel, automation flag disabled, ``navigator.webdriver`` hidden).
-These are legitimate usability options so your own logged-in session
-works — not CAPTCHA bypass or rate-limit evasion.
-
-Without the library or a session file this source honestly reports
+Without the library or credentials this source honestly reports
 ``unavailable`` instead of guessing.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from collections.abc import Sequence
-from pathlib import Path
 from typing import Any
 
 from linkdogger.config.settings import Settings
-from linkdogger.errors import (
-    EnrichmentIncompleteError,
-    RateLimitError,
-    SourceUnavailableError,
-)
+from linkdogger.errors import EnrichmentIncompleteError, SourceUnavailableError
+from linkdogger.linkedin_api import get_linkedin_client, get_linkedin_errors
 from linkdogger.models.person import PersonProfile
+from linkdogger.models.social import SocialProfile
 
 logger = logging.getLogger(__name__)
 
-SCRAPE_DELAY_SECONDS = 2.0
-NOT_INSTALLED_MESSAGE = (
-    "linkedin-scraper is not installed; install it with "
-    "`pip install -e '.[linkedin]'` (and `playwright install chromium`)"
-)
-NO_SESSION_MESSAGE = (
-    "LinkedIn session file not configured; set LINKDOGGER_LINKEDIN_SESSION_FILE "
-    "and create the session with `linkdogger linkedin-login`"
-)
-WEBDRIVER_HIDE_SCRIPT = """
-Object.defineProperty(navigator, "webdriver", { get: () => undefined });
-"""
-
-
-def linkedin_launch_options() -> dict[str, object]:
-    """Playwright launch options that reduce LinkedIn bot detection.
-
-    Uses the real installed Chrome (``channel="chrome"``) instead of the
-    bundled Chromium and disables the automation-controlled flag so the
-    browser behaves like a normal human session. These are legitimate
-    usability options — not CAPTCHA bypass or rate-limit evasion.
-    """
-    return {
-        "channel": "chrome",
-        "args": ["--disable-blink-features=AutomationControlled"],
-    }
-
-
-async def hide_automation_flags(manager: object) -> None:
-    """Hide ``navigator.webdriver`` on the live browser context.
-
-    ``load_session`` recreates the browser context, so this must run
-    after the session is loaded, on the live context.
-    """
-    context = getattr(manager, "context", None)
-    add_init_script = getattr(context, "add_init_script", None)
-    if add_init_script is not None:
-        try:
-            await add_init_script(WEBDRIVER_HIDE_SCRIPT)
-        except Exception as exc:  # noqa: BLE001 - best-effort anti-detection
-            logger.debug("Could not hide automation flags: %s", exc)
+SOURCE = "linkedin-api"
 
 
 class LinkedInEnricher:
-    """Enriches people who already have a LinkedIn URL using the scraper."""
+    """Enriches people who already have a LinkedIn profile."""
 
     name = "linkedin"
 
     def __init__(self, settings: Settings | None = None) -> None:
-        self._session_file = settings.linkedin_session_file if settings else None
-        self._headless = settings.linkedin_headless if settings else True
+        self._email = settings.linkedin_email if settings else None
+        self._password = settings.linkedin_password if settings else None
+        self._cookies_dir = settings.linkedin_cookies_dir if settings else None
+        self._client: Any | None = None
 
     def enrich_all(self, people: Sequence[PersonProfile]) -> list[PersonProfile]:
-        targets = [p for p in people if self._linkedin_url(p) is not None]
+        targets = [p for p in people if self._linkedin_profile(p) is not None]
         if not targets:
             return list(people)
 
-        try:
-            import linkedin_scraper  # noqa: F401 - availability check
-        except ImportError as exc:
-            raise SourceUnavailableError(NOT_INSTALLED_MESSAGE) from exc
-
-        session_file = self._session_file
-        if not session_file or not Path(session_file).is_file():
-            raise SourceUnavailableError(NO_SESSION_MESSAGE)
-
-        try:
-            return asyncio.run(self._scrape(list(people), session_file))
-        except (EnrichmentIncompleteError, SourceUnavailableError, RateLimitError):
-            raise
-        except Exception as exc:  # noqa: BLE001 - browser failures are varied
-            logger.warning("LinkedIn enrichment failed: %s", exc)
-            raise SourceUnavailableError(f"LinkedIn enrichment failed: {exc}") from exc
-
-    @staticmethod
-    def _linkedin_url(person: PersonProfile) -> str | None:
-        profile = person.profiles.get("linkedin")
-        if profile and profile.url:
-            return profile.url
-        return None
-
-    async def _scrape(
-        self, people: list[PersonProfile], session_file: str
-    ) -> list[PersonProfile]:
-        import linkedin_scraper
-
-        try:
-            manager = linkedin_scraper.BrowserManager(
-                headless=self._headless, **linkedin_launch_options()
-            )
-            async with manager:
-                return await self._scrape_with(manager, people)
-        except Exception as exc:  # noqa: BLE001 - launch failure (e.g. no Chrome)
-            if "Failed to start browser" not in str(exc):
-                raise
-            logger.warning("Chrome launch failed (%s); falling back to Chromium", exc)
-            manager = linkedin_scraper.BrowserManager(headless=self._headless)
-            async with manager:
-                return await self._scrape_with(manager, people)
-
-    async def _scrape_with(
-        self, browser_manager: Any, people: list[PersonProfile]
-    ) -> list[PersonProfile]:
-        import linkedin_scraper
+        client = self._client or get_linkedin_client(
+            self._email, self._password, self._cookies_dir
+        )
+        self._client = client
+        challenge_error, unauthorized_error = get_linkedin_errors()
 
         skipped = 0
-        await browser_manager.load_session(self._session_file)
-        await hide_automation_flags(browser_manager)
-        scraper = linkedin_scraper.PersonScraper(browser_manager.page)
-        for person in people:
-            url = self._linkedin_url(person)
-            if url is None:
-                continue
+        for person in targets:
+            profile = self._linkedin_profile(person)
+            assert profile is not None
             try:
-                scraped = await scraper.scrape(url)
-                self._apply_person_data(person, scraped)
-            except linkedin_scraper.AuthenticationError as exc:
+                if not self._enrich_person(client, person, profile):
+                    skipped += 1
+            except (challenge_error, unauthorized_error) as exc:
                 raise SourceUnavailableError(
-                    "LinkedIn session expired; re-run `linkdogger linkedin-login`"
+                    f"LinkedIn session ended during enrichment: {exc}"
                 ) from exc
-            except linkedin_scraper.RateLimitError as exc:
-                raise RateLimitError("LinkedIn rate limit reached") from exc
-            except linkedin_scraper.ProfileNotFoundError:
-                logger.info("LinkedIn profile not found or private: %s", url)
-                skipped += 1
             except Exception as exc:  # noqa: BLE001 - per-person isolation
-                logger.warning("LinkedIn scrape failed for %s: %s", url, exc)
+                logger.warning("LinkedIn enrichment failed for %s: %s", profile, exc)
                 skipped += 1
-            await asyncio.sleep(SCRAPE_DELAY_SECONDS)
         if skipped:
             raise EnrichmentIncompleteError(
                 f"LinkedIn skipped {skipped} profile(s) (not found or failed)",
                 skipped,
             )
-        return people
+        return list(people)
 
-    def _apply_person_data(self, person: PersonProfile, scraped: object) -> None:
-        """Copy scraped data into the profile without overwriting known data."""
-        name = getattr(scraped, "name", None)
-        headline = getattr(scraped, "headline", None)
-        location = getattr(scraped, "location", None)
-        about = getattr(scraped, "about", None)
-        if name and not person.name:
-            person.name = name
-        if headline and not person.position:
-            person.position = headline
-        if location and not person.location:
-            person.location = location
-        if about and not person.bio:
-            person.bio = about
-        if "linkedin-scraper" not in person.sources:
-            person.sources.append("linkedin-scraper")
+    def _enrich_person(
+        self, client: Any, person: PersonProfile, profile: SocialProfile
+    ) -> bool:
+        """Enrich one person; return ``False`` when the profile was skipped."""
+        public_id, urn_id = _profile_ids(profile)
+        data = client.get_profile(public_id=public_id, urn_id=urn_id)
+        if not data:
+            logger.info("LinkedIn profile not found or private: %s", profile)
+            return False
+        self._apply_profile(person, profile, data, public_id, urn_id)
+        if person.email is None:
+            contact = client.get_profile_contact_info(
+                public_id=public_id, urn_id=urn_id
+            )
+            email = (contact or {}).get("email_address")
+            if email:
+                person.email = email
+        return True
+
+    def _apply_profile(
+        self,
+        person: PersonProfile,
+        profile: SocialProfile,
+        data: dict[str, Any],
+        public_id: str | None,
+        urn_id: str | None,
+    ) -> None:
+        """Copy profile data without overwriting known data."""
+        first = data.get("firstName")
+        last = data.get("lastName")
+        if first and last and not person.name:
+            person.name = f"{first} {last}"
+        if data.get("headline") and not person.position:
+            person.position = data["headline"]
+        if data.get("locationName") and not person.location:
+            person.location = data["locationName"]
+        if data.get("summary") and not person.bio:
+            person.bio = data["summary"]
+        public_id = data.get("public_id") or public_id
+        if public_id:
+            profile.username = public_id
+            if not profile.url:
+                profile.url = f"https://www.linkedin.com/in/{public_id}/"
+        if SOURCE not in person.sources:
+            person.sources.append(SOURCE)
+
+    @staticmethod
+    def _linkedin_profile(person: PersonProfile) -> SocialProfile | None:
+        profile = person.profiles.get("linkedin")
+        if profile and (profile.url or profile.username):
+            return profile
+        return None
+
+
+def _profile_ids(profile: SocialProfile) -> tuple[str | None, str | None]:
+    """Extract ``(public_id, urn_id)`` from a linkedin profile reference."""
+    public_id: str | None = None
+    if profile.url:
+        public_id = profile.url.rstrip("/").rsplit("/", 1)[-1]
+    if public_id:
+        return public_id, None
+    username = profile.username
+    if username and username.isdigit():
+        return None, username
+    return username, None

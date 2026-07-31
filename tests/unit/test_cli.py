@@ -103,9 +103,3 @@ def test_linkedin_provider_reports_discovery_gap() -> None:
     payload = json.loads(result.output)
     assert payload["count"] == 0
     assert any("LinkedIn" in w for w in payload["warnings"])
-
-
-def test_linkedin_login_without_session_file_errors() -> None:
-    result = runner.invoke(app, ["linkedin-login"])
-    assert result.exit_code != 0
-    assert "LINKDOGGER_LINKEDIN_SESSION_FILE" in result.output

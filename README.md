@@ -17,11 +17,12 @@ the results through both a CLI and an optional local web dashboard.
   methods (official APIs preferred when available).
 - No authentication bypass, no CAPTCHA circumvention, no rate-limit evasion,
   no fabrication of follower counts or social accounts.
-- The optional LinkedIn provider uses **your own authenticated session**
-  (`linkdogger linkedin-login`) in a real browser and only reads profile
-  pages you choose to enrich; the session file is yours, never shared or
-  committed, and scraping is rate-limited. Understand and accept LinkedIn's
-  terms before using it — use at your own risk.
+- The optional LinkedIn provider uses **your own LinkedIn account**
+  (`LINKDOGGER_LINKEDIN_EMAIL`/`LINKDOGGER_LINKEDIN_PASSWORD`, opt-in) with
+  the `open-linkedin-api` library, which caches your session cookies locally
+  and sleeps between requests to respect rate limits. Your credentials are
+  never shared or committed. Understand and accept LinkedIn's terms before
+  using it — use at your own risk.
 - Unverifiable information is marked unavailable (`null`), never guessed.
 - Every result carries source/provenance information.
 
@@ -74,8 +75,9 @@ started. Secrets are never committed.
 | `LINKDOGGER_WEB_PORT` | `8000` | Port for the web dashboard. |
 | `LINKDOGGER_DISCOVERY_BACKEND` | `mock` | Web backend: `mock` (sample data) or `github` (official API). |
 | `LINKDOGGER_GITHUB_TOKEN` | *(none)* | Optional GitHub token to raise API rate limits. |
-| `LINKDOGGER_LINKEDIN_SESSION_FILE` | *(none)* | Path to your LinkedIn session (created by `linkdogger linkedin-login`). |
-| `LINKDOGGER_LINKEDIN_HEADLESS` | `true` | Run the LinkedIn browser without a window. |
+| `LINKDOGGER_LINKEDIN_EMAIL` | *(none)* | LinkedIn account email for the optional LinkedIn provider. |
+| `LINKDOGGER_LINKEDIN_PASSWORD` | *(none)* | LinkedIn account password (never committed). |
+| `LINKDOGGER_LINKEDIN_COOKIES_DIR` | *(none)* | Directory for the library's cached session cookies (default: `~/.linkedin_api/cookies/`). |
 | `LINKDOGGER_REQUEST_TIMEOUT_SECONDS` | `10.0` | Timeout for provider calls. |
 | `LINKDOGGER_MAX_RESULTS` | `100` | Default maximum results per search. |
 
@@ -85,22 +87,29 @@ The CLI selects a **provider** with `--provider` (default `linkedin`):
 
 | Provider | Discovery | Enrichment |
 | -------- | --------- | ---------- |
-| `linkedin` (default) | Company resolution from LinkedIn URLs | LinkedIn profile enrichment |
+| `linkedin` (default) | Company resolution + people search (with credentials) | LinkedIn profiles (headline, location, bio, published email) |
 | `github` | GitHub organizations + public members | GitHub profiles (email, accounts) |
 | `hybrid` | GitHub organizations + public members | GitHub **and** LinkedIn enrichment |
 | `mock` | Clearly marked sample data | *(none)* |
 
-> **LinkedIn reality check:** LinkedIn exposes no public employee directory,
-> so the `linkedin` provider can resolve a company but cannot yet find
-> people from LinkedIn alone — use `--provider hybrid` to discover people
-> through public GitHub data and enrich their profiles via LinkedIn. The
-> LinkedIn provider also needs the optional extra installed:
+> **LinkedIn setup:** the LinkedIn provider uses your own account through the
+> `open-linkedin-api` library (an HTTP client for LinkedIn's Voyager API, not
+> a browser). Install the optional extra and set your credentials:
 >
 > ```bash
 > pip install -e ".[linkedin]"
-> playwright install chromium
-> linkdogger linkedin-login   # log in once in your browser; saves a session
+> # set LINKDOGGER_LINKEDIN_EMAIL and LINKDOGGER_LINKEDIN_PASSWORD in .env
 > ```
+>
+> Without credentials the `linkedin` provider still resolves companies via
+> slug URLs but honestly reports that people discovery is unavailable.
+> The library sleeps between requests to respect LinkedIn's rate limits —
+> expect enrichment to take a few seconds per profile.
+>
+> > **Python 3.14 note:** `open-linkedin-api` pins `lxml<6.0.0`, which has no
+> > Python 3.14 wheels yet. On Python 3.14 install the extra with
+> > `pip install -e ".[linkedin]" --no-deps` and then
+> > `pip install beautifulsoup4` (lxml 6.x already satisfies it).
 
 By default the web dashboard uses the mock backend (`mock-sample-data`) so it
 can be explored without network access. Set `LINKDOGGER_DISCOVERY_BACKEND=github`
@@ -236,6 +245,7 @@ linkdogger/
 │       ├── __main__.py
 │       ├── cli.py                 # Typer CLI (search, --json, --web)
 │       ├── errors.py              # LinkDoggerError hierarchy
+│       ├── linkedin_api.py        # shared open-linkedin-api client helper
 │       ├── config/
 │       │   └── settings.py        # LINKDOGGER_* configuration
 │       ├── models/
@@ -248,7 +258,7 @@ linkdogger/
 │       │   ├── base.py            # CompanyDiscoverer / PeopleDiscoverer
 │       │   ├── mock.py            # sample data backend
 │       │   ├── github.py          # official GitHub API backend
-│       │   └── linkedin.py        # LinkedIn provider (company resolution)
+│       │   └── linkedin.py        # LinkedIn provider (Voyager API client)
 │       ├── enrichment/
 │       │   ├── base.py            # Enricher protocol
 │       │   ├── github.py
