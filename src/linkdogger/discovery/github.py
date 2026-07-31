@@ -30,6 +30,7 @@ logger = logging.getLogger(__name__)
 GITHUB_API_BASE = "https://api.github.com"
 MAX_RETRY_WAIT_SECONDS = 5.0
 MAX_RETRIES = 1
+MAX_MEMBER_PAGES = 10
 
 
 def _extract_retry_after(response: httpx.Response) -> float:
@@ -162,12 +163,13 @@ def _domain_from_url(url: str | None) -> str | None:
 
 
 class GitHubPeopleDiscoverer(PeopleDiscoverer):
-    """Discovers people whose public GitHub profile names ``company``.
+    """Discovers public members of the company's GitHub organization.
 
-    Uses the official Search Users API with the ``company:`` qualifier.
-    Only the public company field is matched; private or hidden data is
-    never accessed. Results are candidates: their identity is validated
-    and enriched in later pipeline stages.
+    Uses the official ``/orgs/{login}/members`` endpoint. GitHub's user
+    search ``company:`` qualifier currently returns no results, so public
+    organization membership is the reliable public signal for "people
+    associated with this company". Only public membership is read; hidden
+    or private data is never accessed.
     """
 
     def __init__(
@@ -175,37 +177,45 @@ class GitHubPeopleDiscoverer(PeopleDiscoverer):
         settings: Settings,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
+        self._settings = settings
         self._client = GitHubClient(settings, transport=transport)
 
     def discover_people(self, company: Company) -> list[PersonProfile]:
-        from urllib.parse import quote
-
-        query = quote(f'company:"{company.name}"')
-        search_path = f"/search/users?q={query}&per_page=30"
-        payload = self._client.get_json(search_path)
-        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
-            raise ProviderError("Malformed GitHub user search response")
+        login = company.aliases[0] if company.aliases else None
+        if not login:
+            return []
 
         people: list[PersonProfile] = []
-        for item in payload["items"]:
-            login = item.get("login")
-            if not login or item.get("type") == "Organization":
-                continue
-            people.append(
-                PersonProfile(
-                    name=login,
-                    company=company.name,
-                    position=None,
-                    profiles={
-                        "github": SocialProfile(
-                            platform="github",
-                            url=f"https://github.com/{login}",
-                            username=login,
-                            source="github-api",
-                            identity_confidence=None,
-                        )
-                    },
-                    sources=["github-api"],
-                )
+        per_page = 30
+        page = 1
+        while len(people) < self._settings.max_results and page <= MAX_MEMBER_PAGES:
+            payload = self._client.get_json(
+                f"/orgs/{login}/members?per_page={per_page}&page={page}"
             )
-        return people
+            if not isinstance(payload, list):
+                raise ProviderError("Malformed GitHub members response")
+            if not payload:
+                break
+            for item in payload:
+                user = item.get("login")
+                if not user or item.get("type") != "User":
+                    continue
+                people.append(
+                    PersonProfile(
+                        name=user,
+                        company=company.name,
+                        position=None,
+                        profiles={
+                            "github": SocialProfile(
+                                platform="github",
+                                url=f"https://github.com/{user}",
+                                username=user,
+                                source="github-api",
+                                identity_confidence=None,
+                            )
+                        },
+                        sources=["github-api"],
+                    )
+                )
+            page += 1
+        return people[: self._settings.max_results]

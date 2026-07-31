@@ -142,7 +142,7 @@ def search(
         console.print(f"[green]{message}[/green]")
 
     if json_output:
-        console.print(render_json(result), markup=False)
+        console.print(render_json(result), markup=False, soft_wrap=True)
         return
 
     console.print(f"[bold cyan]LinkDogger[/bold cyan] v{__version__}")
