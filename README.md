@@ -129,7 +129,7 @@ to use the GitHub API for real company and people discovery; the backend is safe
 to run without a token and automatically degrades to public, unauthenticated
 calls.
 
-##ToDo's
+## ToDo's
 [] Add system to export all the found mail to JSON file.
 [] Add llm support to app 
 [] Enable IPC and MCP support of the app
