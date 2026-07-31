@@ -158,7 +158,7 @@ def test_company_verification_falls_back_to_slug_on_error(
     assert company.source == "linkedin-slug"
 
 
-def test_company_verification_retries_transient_block(
+def test_company_verification_retries_blocked_headed(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _install_fake_linkedin_scraper(monkeypatch)
@@ -173,3 +173,24 @@ def test_company_verification_retries_transient_block(
     assert company is not None
     assert company.source == "linkedin-scraper"
     assert FakeCompanyScraper.calls == 2
+    attempts = FakeBrowserManager.launched  # type: ignore[attr-defined]
+    assert [m.headless for m in attempts] == [True, False]
+
+
+def test_headed_verification_does_not_retry(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_linkedin_scraper(monkeypatch)
+    FakeCompanyScraper.errors = [
+        RuntimeError("Page.goto: net::ERR_HTTP_RESPONSE_CODE_FAILURE")
+    ]
+    discoverer = LinkedInCompanyDiscoverer(
+        _settings(
+            linkedin_session_file=_session_file(tmp_path),
+            linkedin_headless=False,
+        )
+    )
+    company = discoverer.resolve_company("OpenAI")
+    assert company is not None
+    assert company.source == "linkedin-slug"
+    assert FakeCompanyScraper.calls == 1

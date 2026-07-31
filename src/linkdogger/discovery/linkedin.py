@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
 
 from linkdogger.config.settings import Settings
 from linkdogger.discovery.base import CompanyDiscoverer, PeopleDiscoverer
@@ -73,7 +72,7 @@ class LinkedInCompanyDiscoverer(CompanyDiscoverer):
         try:
             import asyncio
 
-            from linkedin_scraper import CompanyScraper
+            import linkedin_scraper  # noqa: F401 - availability check
         except ImportError:
             logger.warning(
                 "linkedin-scraper not installed; company URL stays unverified "
@@ -84,27 +83,48 @@ class LinkedInCompanyDiscoverer(CompanyDiscoverer):
         try:
 
             async def scrape() -> Company | None:
-                from linkedin_scraper import BrowserManager
+                from linkedin_scraper import BrowserManager, CompanyScraper
 
                 from linkdogger.enrichment.linkedin import (
                     hide_automation_flags,
                     linkedin_launch_options,
                 )
 
-                async with BrowserManager(
-                    headless=self._headless, **linkedin_launch_options()
-                ) as browser:
-                    await browser.load_session(self._session_file)
-                    await hide_automation_flags(browser)
-                    scraper = CompanyScraper(browser.page)
-                    company = await self._scrape_company(scraper, url)
-                    return Company(
-                        name=company.name,
-                        aliases=[company.name.lower().replace(" ", "-")],
-                        description=getattr(company, "about", None),
-                        source="linkedin-scraper",
-                        resolved_from=url,
-                    )
+                # LinkedIn's WAF often blocks headless browsing outright
+                # (net::ERR_HTTP_RESPONSE_CODE_FAILURE); your own session is
+                # trusted when the browser is visible, so retry headed once.
+                attempts = [False]
+                if self._headless:
+                    attempts.insert(0, self._headless)
+                last_block: Exception | None = None
+                for headless in attempts:
+                    try:
+                        async with BrowserManager(
+                            headless=headless, **linkedin_launch_options()
+                        ) as browser:
+                            await browser.load_session(self._session_file)
+                            await hide_automation_flags(browser)
+                            scraper = CompanyScraper(browser.page)
+                            company = await scraper.scrape(url)
+                            return Company(
+                                name=company.name,
+                                aliases=[company.name.lower().replace(" ", "-")],
+                                description=getattr(company, "about", None),
+                                source="linkedin-scraper",
+                                resolved_from=url,
+                            )
+                    except Exception as exc:  # noqa: BLE001 - retry block headed
+                        if "ERR_HTTP_RESPONSE_CODE_FAILURE" not in str(exc):
+                            raise
+                        last_block = exc
+                        logger.warning(
+                            "Company page blocked with headless=%s (%s); "
+                            "retrying once with a visible browser",
+                            headless,
+                            exc,
+                        )
+                assert last_block is not None
+                raise last_block
 
             return asyncio.run(scrape())
         except SourceUnavailableError as exc:
@@ -113,16 +133,6 @@ class LinkedInCompanyDiscoverer(CompanyDiscoverer):
         except Exception as exc:  # noqa: BLE001 - scraper raises many error types
             logger.warning("LinkedIn company verification failed: %s", exc)
             return None
-
-    async def _scrape_company(self, scraper: Any, url: str) -> Any:
-        """Scrape the company page, retrying once on transient blocks."""
-        try:
-            return await scraper.scrape(url)
-        except Exception as exc:  # noqa: BLE001 - retry transient goto blocks
-            if "ERR_HTTP_RESPONSE_CODE_FAILURE" not in str(exc):
-                raise
-            logger.warning("Company page blocked (%s); retrying once", exc)
-            return await scraper.scrape(url)
 
 
 class LinkedInPeopleDiscoverer(PeopleDiscoverer):
