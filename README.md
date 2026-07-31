@@ -31,17 +31,15 @@ conventional commit and pull request.
 | 0 | Project bootstrap | Done |
 | 1 | CLI (`search`, `--json`, `--version`) | Done |
 | 2 | Company discovery | Done |
-| 3 | People discovery | In progress |
-| 2 | Company discovery | Planned |
-| 3 | People discovery | Planned |
-| 4 | Social profile enrichment | Planned |
-| 5 | Identity matching | Planned |
-| 6 | Networking intelligence scoring | Planned |
-| 7 | Sorting and filtering | Planned |
-| 8 | JSON output and export | Planned |
-| 9 | Web GUI | Planned |
-| 10 | Testing and hardening | Planned |
-| 11 | Final documentation | Planned |
+| 3 | People discovery | Done |
+| 4 | Social profile enrichment | Done |
+| 5 | Identity matching | Done |
+| 6 | Networking intelligence scoring | Done |
+| 7 | Sorting and filtering | Done |
+| 8 | JSON output and export | Done |
+| 9 | Web GUI | Done |
+| 10 | Testing and hardening | Done |
+| 11 | Final documentation | Done |
 
 ## Requirements
 
@@ -65,11 +63,21 @@ Configuration is read from environment variables prefixed with `LINKDOGGER_`
 and an optional local `.env` file. Copy `.env.example` to `.env` to get
 started. Secrets are never committed.
 
-```text
-LINKDOGGER_LOG_LEVEL=INFO
-LINKDOGGER_WEB_HOST=127.0.0.1
-LINKDOGGER_WEB_PORT=8000
-```
+| Variable | Default | Description |
+| -------- | ------- | ----------- |
+| `LINKDOGGER_LOG_LEVEL` | `INFO` | Logging verbosity. |
+| `LINKDOGGER_WEB_HOST` | `127.0.0.1` | Bind address for the web dashboard. |
+| `LINKDOGGER_WEB_PORT` | `8000` | Port for the web dashboard. |
+| `LINKDOGGER_DISCOVERY_BACKEND` | `mock` | `mock` (sample data) or `github` (official API). |
+| `LINKDOGGER_GITHUB_TOKEN` | *(none)* | Optional GitHub token to raise API rate limits. |
+| `LINKDOGGER_REQUEST_TIMEOUT_SECONDS` | `10.0` | Timeout for provider calls. |
+| `LINKDOGGER_MAX_RESULTS` | `100` | Default maximum results per search. |
+
+By default the app uses a mock backend (`mock-sample-data`) so it can be
+explored without network access. Set `LINKDOGGER_DISCOVERY_BACKEND=github` to
+use the GitHub API for real company and people discovery; the backend is safe
+to run without a token and automatically degrades to public, unauthenticated
+calls.
 
 ## Usage
 
@@ -115,19 +123,52 @@ linkdogger search "OpenAI" --json
 Emits a versioned JSON document (`schema_version`) with `query`,
 `generated_at`, `count`, and `results`.
 
-> **Note:** the current build returns clearly marked sample data (source
-> `mock-sample-data`) while real company/people discovery is being
-> implemented in later stages. Results are `null` when information is
-> unavailable — never guessed.
+### Sorting, filtering and limits
+
+```bash
+# Sort by networking score (asc or desc), then take the top 5
+linkdogger search "OpenAI" --sort networking-score-desc --limit 5
+
+# Filter by role and location
+linkdogger search "OpenAI" --role engineer --location "San Francisco"
+```
+
+`--sort` accepts `followers`, `networking-score`, `followback`, `influence`
+or `name`, each optionally suffixed with `-asc`/`-desc` (default `desc`).
+
+### Exporting results
+
+```bash
+linkdogger search "OpenAI" --export results.json
+linkdogger search "OpenAI" --export results.csv
+linkdogger search "OpenAI" --export results.md
+```
+
+### Web dashboard
+
+```bash
+linkdogger --web
+```
+
+Serves a local dashboard at `http://127.0.0.1:8000` (see configuration above)
+with a search form, result cards, and the same sorting/filtering options as
+the CLI, backed by the same `PeopleService` pipeline.
+
+> **Note:** the mock backend returns clearly marked sample data (source
+> `mock-sample-data`). Unavailable information is `null` — never guessed.
 
 ## Development
 
 ```bash
+pip install -e ".[dev]"
 ruff check .
 ruff format .
 mypy src
 pytest
 ```
+
+Continuous integration runs lint, format, type and test checks on every push
+and pull request (`.github/workflows/ci.yml`) across Python 3.12–3.14.
 
 ## Project Structure
 
@@ -138,26 +179,52 @@ linkdogger/
 ├── LICENSE
 ├── .gitignore
 ├── .env.example
+├── .github/workflows/ci.yml
 ├── src/
 │   └── linkdogger/
 │       ├── __init__.py
 │       ├── __main__.py
-│       ├── cli.py
+│       ├── cli.py                 # Typer CLI (search, --json, --web)
+│       ├── errors.py              # LinkDoggerError hierarchy
 │       ├── config/
-│       │   └── settings.py
+│       │   └── settings.py        # LINKDOGGER_* configuration
 │       ├── models/
+│       │   ├── company.py
 │       │   ├── person.py
 │       │   ├── social.py
 │       │   ├── networking.py
-│       │   └── search.py
+│       │   └── search.py          # versioned SearchResult envelope
 │       ├── discovery/
-│       │   ├── base.py
-│       │   └── mock.py
+│       │   ├── base.py            # CompanyDiscoverer / PeopleDiscoverer
+│       │   ├── mock.py            # sample data backend
+│       │   └── github.py          # official GitHub API backend
+│       ├── enrichment/
+│       │   ├── base.py            # Enricher protocol
+│       │   ├── github.py
+│       │   ├── linkedin.py
+│       │   ├── website.py
+│       │   └── social.py
+│       ├── matching/
+│       │   └── identity.py        # cross-platform identity merging
+│       ├── scoring/
+│       │   ├── weights.py
+│       │   ├── followback.py
+│       │   └── networking.py
 │       ├── services/
-│       │   └── people_service.py
-│       └── output/
-│           ├── json.py
-│           └── table.py
+│       │   ├── people_service.py  # shared pipeline (CLI + web)
+│       │   ├── processing.py      # sort keys, result filters
+│       │   └── factory.py         # backend wiring
+│       ├── output/
+│       │   ├── json.py
+│       │   ├── table.py
+│       │   └── export.py          # JSON / CSV / Markdown
+│       └── web/
+│           ├── app.py             # FastAPI factory
+│           ├── routes.py
+│           ├── templates/index.html
+│           └── static/
+│               ├── app.js
+│               └── style.css
 └── tests/
     ├── unit/
     ├── integration/
