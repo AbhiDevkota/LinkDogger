@@ -129,7 +129,9 @@ Shows a live searching animation while discovery runs, then displays a table
 of publicly discoverable people associated with the company, ranked by
 **follow-back likelihood (descending)** by default. Each row also shows the
 person's **email** (public profile address, or resolved from their public
-commit history when the profile has none) and their **connected accounts**
+commit history — latest commit on their most recent repo, its `.patch`
+header, then commit search — when the profile has none) and their
+**connected accounts**
 (GitHub, website, X, LinkedIn when published) as clickable hyperlinks:
 
 ```text

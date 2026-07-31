@@ -12,6 +12,7 @@ def clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "WEB_HOST",
         "WEB_PORT",
         "REQUEST_TIMEOUT_SECONDS",
+        "GITHUB_EMAIL_PATCH_TIMEOUT_SECONDS",
         "MAX_RESULTS",
         "DISCOVERY_BACKEND",
         "GITHUB_TOKEN",
@@ -27,6 +28,7 @@ def test_defaults() -> None:
     assert settings.web_host == "127.0.0.1"
     assert settings.web_port == 8000
     assert settings.request_timeout_seconds == 10.0
+    assert settings.github_email_patch_timeout_seconds == 10.0
     assert settings.max_results == 100
     assert settings.discovery_backend == "mock"
     assert settings.github_token is None
@@ -42,6 +44,7 @@ def test_environment_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LINKDOGGER_GITHUB_TOKEN", "gh_test_token")
     monkeypatch.setenv("LINKDOGGER_LINKEDIN_SESSION_FILE", "linkedin-session.json")
     monkeypatch.setenv("LINKDOGGER_LINKEDIN_HEADLESS", "false")
+    monkeypatch.setenv("LINKDOGGER_GITHUB_EMAIL_PATCH_TIMEOUT_SECONDS", "0")
 
     settings = Settings(_env_file=None)
     assert settings.log_level == "DEBUG"
@@ -51,6 +54,7 @@ def test_environment_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.github_token == "gh_test_token"
     assert settings.linkedin_session_file == "linkedin-session.json"
     assert settings.linkedin_headless is False
+    assert settings.github_email_patch_timeout_seconds == 0
 
 
 def test_unknown_environment_variables_are_ignored(

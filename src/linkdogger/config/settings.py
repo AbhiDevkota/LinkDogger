@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     web_host: str = "127.0.0.1"
     web_port: int = 8000
     request_timeout_seconds: float = 10.0
+    github_email_patch_timeout_seconds: float | None = 10.0
     max_results: int = 100
     discovery_backend: Literal["mock", "github"] = "mock"
     github_token: str | None = None
