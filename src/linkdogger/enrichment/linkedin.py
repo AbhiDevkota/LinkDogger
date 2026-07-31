@@ -1,16 +1,22 @@
 """LinkedIn enrichment via the optional ``linkedin-scraper`` library.
 
 ``linkedin-scraper`` is a Playwright-based scraper (v3+): it opens a
-real Chromium browser using your own authenticated LinkedIn session and
-reads profile pages. LinkDogger therefore treats LinkedIn as an
-*opt-in extraction engine*:
+real browser using your own authenticated LinkedIn session and reads
+profile pages. LinkDogger therefore treats LinkedIn as an *opt-in
+extraction engine*:
 
-* the session is created once, by you, in your own browser;
+* the session is created once, by you (``linkdogger linkedin-login``),
+  in your own browser and saved for reuse;
 * the session file is reused (``load_session``) and never shared;
 * nothing is scraped unless a person already has a known LinkedIn URL
   (e.g. found in a public GitHub bio);
 * rate limits are respected with a delay between requests and never
   circumvented; ``RateLimitError`` propagates instead of retrying hard.
+
+The browser is launched with anti-detection options (real Chrome
+channel, automation flag disabled, ``navigator.webdriver`` hidden).
+These are legitimate usability options so your own logged-in session
+works — not CAPTCHA bypass or rate-limit evasion.
 
 Without the library or a session file this source honestly reports
 ``unavailable`` instead of guessing.
@@ -22,6 +28,7 @@ import asyncio
 import logging
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 from linkdogger.config.settings import Settings
 from linkdogger.errors import (
@@ -42,6 +49,38 @@ NO_SESSION_MESSAGE = (
     "LinkedIn session file not configured; set LINKDOGGER_LINKEDIN_SESSION_FILE "
     "and create the session with `linkdogger linkedin-login`"
 )
+WEBDRIVER_HIDE_SCRIPT = """
+Object.defineProperty(navigator, "webdriver", { get: () => undefined });
+"""
+
+
+def linkedin_launch_options() -> dict[str, object]:
+    """Playwright launch options that reduce LinkedIn bot detection.
+
+    Uses the real installed Chrome (``channel="chrome"``) instead of the
+    bundled Chromium and disables the automation-controlled flag so the
+    browser behaves like a normal human session. These are legitimate
+    usability options — not CAPTCHA bypass or rate-limit evasion.
+    """
+    return {
+        "channel": "chrome",
+        "args": ["--disable-blink-features=AutomationControlled"],
+    }
+
+
+def _hide_automation_flags(manager: object) -> None:
+    """Hide ``navigator.webdriver`` on the live browser context.
+
+    ``load_session`` recreates the browser context, so this must run
+    after the session is loaded, on the live context.
+    """
+    context = getattr(manager, "context", None)
+    add_init_script = getattr(context, "add_init_script", None)
+    if add_init_script is not None:
+        try:
+            add_init_script(WEBDRIVER_HIDE_SCRIPT)
+        except Exception as exc:  # noqa: BLE001 - best-effort anti-detection
+            logger.debug("Could not hide automation flags: %s", exc)
 
 
 class LinkedInEnricher:
@@ -87,30 +126,49 @@ class LinkedInEnricher:
     ) -> list[PersonProfile]:
         import linkedin_scraper
 
+        try:
+            manager = linkedin_scraper.BrowserManager(
+                headless=self._headless, **linkedin_launch_options()
+            )
+            async with manager:
+                return await self._scrape_with(manager, people)
+        except Exception as exc:  # noqa: BLE001 - launch failure (e.g. no Chrome)
+            if "Failed to start browser" not in str(exc):
+                raise
+            logger.warning("Chrome launch failed (%s); falling back to Chromium", exc)
+            manager = linkedin_scraper.BrowserManager(headless=self._headless)
+            async with manager:
+                return await self._scrape_with(manager, people)
+
+    async def _scrape_with(
+        self, browser_manager: Any, people: list[PersonProfile]
+    ) -> list[PersonProfile]:
+        import linkedin_scraper
+
         skipped = 0
-        async with linkedin_scraper.BrowserManager(headless=self._headless) as browser:
-            await browser.load_session(session_file)
-            scraper = linkedin_scraper.PersonScraper(browser.page)
-            for person in people:
-                url = self._linkedin_url(person)
-                if url is None:
-                    continue
-                try:
-                    scraped = await scraper.scrape(url)
-                    self._apply_person_data(person, scraped)
-                except linkedin_scraper.AuthenticationError as exc:
-                    raise SourceUnavailableError(
-                        "LinkedIn session expired; re-run `linkdogger linkedin-login`"
-                    ) from exc
-                except linkedin_scraper.RateLimitError as exc:
-                    raise RateLimitError("LinkedIn rate limit reached") from exc
-                except linkedin_scraper.ProfileNotFoundError:
-                    logger.info("LinkedIn profile not found or private: %s", url)
-                    skipped += 1
-                except Exception as exc:  # noqa: BLE001 - per-person isolation
-                    logger.warning("LinkedIn scrape failed for %s: %s", url, exc)
-                    skipped += 1
-                await asyncio.sleep(SCRAPE_DELAY_SECONDS)
+        await browser_manager.load_session(self._session_file)
+        _hide_automation_flags(browser_manager)
+        scraper = linkedin_scraper.PersonScraper(browser_manager.page)
+        for person in people:
+            url = self._linkedin_url(person)
+            if url is None:
+                continue
+            try:
+                scraped = await scraper.scrape(url)
+                self._apply_person_data(person, scraped)
+            except linkedin_scraper.AuthenticationError as exc:
+                raise SourceUnavailableError(
+                    "LinkedIn session expired; re-run `linkdogger linkedin-login`"
+                ) from exc
+            except linkedin_scraper.RateLimitError as exc:
+                raise RateLimitError("LinkedIn rate limit reached") from exc
+            except linkedin_scraper.ProfileNotFoundError:
+                logger.info("LinkedIn profile not found or private: %s", url)
+                skipped += 1
+            except Exception as exc:  # noqa: BLE001 - per-person isolation
+                logger.warning("LinkedIn scrape failed for %s: %s", url, exc)
+                skipped += 1
+            await asyncio.sleep(SCRAPE_DELAY_SECONDS)
         if skipped:
             raise EnrichmentIncompleteError(
                 f"LinkedIn skipped {skipped} profile(s) (not found or failed)",

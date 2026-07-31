@@ -51,9 +51,13 @@ class FakeState:
 
 
 class FakeBrowserManager:
-    def __init__(self, headless: bool = True) -> None:
+    launched: list["FakeBrowserManager"] = []
+
+    def __init__(self, headless: bool = True, **launch_options) -> None:
         self.headless = headless
+        self.launch_options = launch_options
         self.page = None
+        FakeBrowserManager.launched.append(self)
 
     async def __aenter__(self) -> "FakeBrowserManager":
         return self
@@ -92,6 +96,7 @@ def _install_fake_linkedin_scraper(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "linkedin_scraper", module)
     FakeState.error = None
     FakeState.person = None
+    FakeBrowserManager.launched = []
 
 
 def _person_with_linkedin() -> PersonProfile:
@@ -124,7 +129,7 @@ def test_unavailable_without_session_file(monkeypatch: pytest.MonkeyPatch) -> No
 
 
 def test_unavailable_when_library_missing(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delitem(sys.modules, "linkedin_scraper", raising=False)
+    monkeypatch.setitem(sys.modules, "linkedin_scraper", None)
     enricher = LinkedInEnricher()
     with pytest.raises(SourceUnavailableError, match="not installed"):
         enricher.enrich_all([_person_with_linkedin()])
@@ -178,6 +183,20 @@ def test_session_file_is_loaded_from_settings(
     enricher = LinkedInEnricher(settings)
     result = enricher.enrich_all([_person_with_linkedin()])
     assert result[0].position == "Engineer at Acme"
+
+
+def test_browser_is_launched_with_anti_detection_options(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_linkedin_scraper(monkeypatch)
+    enricher = LinkedInEnricher()
+    enricher._session_file = _session_file(tmp_path)  # noqa: SLF001
+    result = enricher.enrich_all([_person_with_linkedin()])
+    assert result[0].position == "Engineer at Acme"
+    last_manager = FakeBrowserManager.launched[-1]  # type: ignore[attr-defined]
+    assert last_manager.launch_options["channel"] == "chrome"
+    launched_args = last_manager.launch_options["args"]
+    assert "--disable-blink-features=AutomationControlled" in launched_args
 
 
 def test_auth_error_raises_unavailable(
