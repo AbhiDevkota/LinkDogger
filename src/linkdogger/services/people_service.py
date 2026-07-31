@@ -18,6 +18,7 @@ from linkdogger.errors import (
     RateLimitError,
     SourceUnavailableError,
 )
+from linkdogger.matching.identity import IdentityMatcher
 from linkdogger.models.company import Company
 from linkdogger.models.person import PersonProfile
 from linkdogger.models.search import SearchResult
@@ -40,11 +41,13 @@ class PeopleService:
         company_discoverer: CompanyDiscoverer,
         people_discoverer: PeopleDiscoverer,
         enrichers: Sequence[Enricher] = (),
+        identity_matcher: IdentityMatcher | None = None,
     ) -> None:
         self._settings = settings
         self._company_discoverer = company_discoverer
         self._people_discoverer = people_discoverer
         self._enrichers = list(enrichers)
+        self._identity_matcher = identity_matcher or IdentityMatcher()
 
     def search_company(self, company_query: str) -> SearchResult:
         """Discover publicly discoverable people for ``company_query``."""
@@ -60,6 +63,9 @@ class PeopleService:
 
         people, source_status = self._enrich_people(people)
         logger.info("Enrichment complete for %d people", len(people))
+
+        people = self._match_people(people)
+        logger.info("Identity matching complete: %d people", len(people))
 
         return SearchResult(
             query=company_query,
@@ -122,6 +128,9 @@ class PeopleService:
             found = any(platform in person.profiles for person in people)
             statuses[platform] = "ok" if found else "no-data"
         return statuses
+
+    def _match_people(self, people: list[PersonProfile]) -> list[PersonProfile]:
+        return self._identity_matcher.match_people(people)
 
     def _empty_result(self, company_query: str) -> SearchResult:
         return SearchResult(
