@@ -40,7 +40,7 @@ class WebsiteEnricher:
         skipped = 0
         for person in people:
             website = person.profiles.get("website")
-            if website is None:
+            if website is None or website.url is None:
                 continue
             try:
                 response = self._client.head(website.url)

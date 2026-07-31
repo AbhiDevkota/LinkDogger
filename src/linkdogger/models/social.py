@@ -7,7 +7,7 @@ class SocialProfile(BaseModel):
     """A social/professional profile link for a person."""
 
     platform: str
-    url: str
+    url: str | None = None
     username: str | None = None
     followers: int | None = None
     following: int | None = None

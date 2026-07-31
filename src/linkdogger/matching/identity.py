@@ -82,7 +82,9 @@ class IdentityMatcher:
         website_b = b.profiles.get("website")
         if (
             website_a is not None
+            and website_a.url is not None
             and website_b is not None
+            and website_b.url is not None
             and _normalize_url(website_a.url) == _normalize_url(website_b.url)
         ):
             signals.append(WEBSITE_MATCH_SCORE)

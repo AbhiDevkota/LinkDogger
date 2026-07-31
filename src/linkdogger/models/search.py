@@ -21,3 +21,10 @@ class SearchResult(BaseModel):
     results: list[PersonProfile] = Field(default_factory=list)
     source_status: dict[str, str] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
+    filtered_out_count: int = Field(
+        default=0,
+        description=(
+            "Number of discovered profiles excluded by the active filters "
+            "(e.g. --location or --role)."
+        ),
+    )
