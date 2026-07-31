@@ -73,3 +73,19 @@ def test_api_search_filters_by_role() -> None:
 def test_api_search_respects_limit() -> None:
     response = client.get("/api/search", params={"company": "Acme", "limit": 2})
     assert response.json()["count"] == 2
+
+
+def test_api_search_accepts_provider() -> None:
+    response = client.get("/api/search", params={"company": "Acme", "provider": "mock"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["count"] == 3
+    assert payload["results"][0]["networking"]["networking_score"] is not None
+
+
+def test_api_search_rejects_unknown_provider() -> None:
+    response = client.get(
+        "/api/search", params={"company": "Acme", "provider": "bogus"}
+    )
+    assert response.status_code == 400
+    assert "invalid provider" in response.json()["detail"]

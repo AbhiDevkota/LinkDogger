@@ -1,49 +1,180 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>LinkDogger</title>
+  <title>LinkDogger — Find the people worth connecting with</title>
+  <meta name="description" content="Public-profile people discovery and networking intelligence. Search any company and find the people worth connecting with.">
+  <meta property="og:title" content="LinkDogger">
+  <meta property="og:description" content="Find the people worth connecting with at any company.">
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <header class="app-header">
-    <h1>LinkDogger</h1>
-    <p class="tagline">Public-profile people discovery and networking intelligence</p>
+  <nav class="navbar">
+    <div class="navbar-inner">
+      <a class="brand" href="/" aria-label="LinkDogger home">
+        <img src="/static/favicon.svg" alt="" width="30" height="30">
+        <span class="brand-name">LinkDogger</span>
+        <span class="brand-tag">Beta</span>
+      </a>
+      <div class="nav-links">
+        <a href="#search" class="nav-link">Search</a>
+        <a href="#how-it-works" class="nav-link">How it works</a>
+        <a href="https://github.com/AbhiDevkota/LinkDogger" target="_blank" rel="noopener" class="nav-link">GitHub</a>
+      </div>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="hero-inner">
+      <div class="hero-eyebrow">
+        <span class="pulse-dot"></span>
+        People discovery &amp; networking intelligence
+      </div>
+      <h1 class="hero-title">
+        Find the people <span class="gradient-text">worth connecting with</span>
+      </h1>
+      <p class="hero-subtitle">
+        Search any company and instantly discover publicly available profiles,
+        networking signals, and follow-back likelihood — all in one place.
+      </p>
+
+      <form id="search-form" class="search-panel" role="search" autocomplete="off">
+        <div class="search-row">
+          <span class="search-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <circle cx="11" cy="11" r="7"></circle>
+              <line x1="21" y1="21" x2="16.5" y2="16.5"></line>
+            </svg>
+          </span>
+          <input
+            id="company-input"
+            name="company"
+            type="search"
+            placeholder="e.g. OpenAI, Microsoft, Stripe…"
+            aria-label="Company name"
+            required>
+          <select id="provider-select" aria-label="Discovery provider">
+            <option value="mock">Sample data</option>
+            <option value="github">GitHub</option>
+            <option value="hybrid">Hybrid</option>
+            <option value="linkedin">LinkedIn</option>
+          </select>
+          <button id="search-button" type="submit">
+            Search
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+              <polyline points="12 5 19 12 12 19"></polyline>
+            </svg>
+          </button>
+        </div>
+        <div class="search-suggestions" id="suggestions">
+          <span class="suggestions-label">Try:</span>
+          <button type="button" class="chip" data-company="OpenAI">OpenAI</button>
+          <button type="button" class="chip" data-company="Microsoft">Microsoft</button>
+          <button type="button" class="chip" data-company="Stripe">Stripe</button>
+          <button type="button" class="chip" data-company="Riot Games">Riot Games</button>
+        </div>
+      </form>
+    </div>
   </header>
 
-  <main class="container">
-    <form id="search-form" class="search-box">
-      <input id="company-input" type="text" placeholder="Search company (e.g. OpenAI)" autocomplete="off" autofocus>
-      <button type="submit">Search</button>
-    </form>
+  <main class="main">
+    <div id="results-panel" class="results-panel" hidden>
+      <section class="summary-bar" id="summary-bar">
+        <div class="summary-company">
+          <h2 class="summary-title" id="summary-title">Results</h2>
+          <p class="summary-meta" id="summary-meta"></p>
+        </div>
+        <div class="source-badges" id="source-badges"></div>
+      </section>
 
-    <div class="controls">
-      <label for="sort-select">Sort by
-        <select id="sort-select">
-          <option value="followback-desc" selected>Follow-back Likelihood</option>
-          <option value="followers-desc">Followers</option>
-          <option value="networking-score-desc">Networking Score</option>
-          <option value="influence-desc">Influence</option>
-          <option value="name-asc">Name</option>
-        </select>
-      </label>
-      <label for="role-input">Role filter
-        <input id="role-input" type="text" placeholder="e.g. engineer">
-      </label>
-      <label for="location-input">Location filter
-        <input id="location-input" type="text" placeholder="e.g. San Francisco">
-      </label>
+      <div id="warnings" class="warnings" hidden></div>
+
+      <section class="controls" aria-label="Filter and sort results">
+        <label class="control">
+          <span>Sort by</span>
+          <select id="sort-select">
+            <option value="followback-desc">Follow-back likelihood</option>
+            <option value="followers-desc">Followers</option>
+            <option value="networking-score-desc">Networking score</option>
+            <option value="influence-desc">Influence</option>
+            <option value="name-asc">Name A–Z</option>
+          </select>
+        </label>
+        <label class="control">
+          <span>Role</span>
+          <input id="role-input" type="text" placeholder="e.g. engineer" aria-label="Role filter">
+        </label>
+        <label class="control">
+          <span>Location</span>
+          <input id="location-input" type="text" placeholder="e.g. London" aria-label="Location filter">
+        </label>
+        <label class="control control-small">
+          <span>Max results</span>
+          <input id="limit-input" type="number" min="1" max="100" value="25" aria-label="Maximum results">
+        </label>
+        <button id="filter-button" class="filter-button" type="button">Apply</button>
+      </section>
+
+      <section id="results" class="results-grid" aria-live="polite"></section>
+
+      <div id="empty-state" class="empty-state" hidden>
+        <div class="empty-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="7"></circle>
+            <line x1="21" y1="21" x2="16.5" y2="16.5"></line>
+          </svg>
+        </div>
+        <h3 id="empty-title">No results found</h3>
+        <p id="empty-message">Try a different company name, or clear the filters.</p>
+      </div>
     </div>
 
-    <div id="status" class="status" hidden></div>
-    <section id="results" class="results" aria-live="polite"></section>
+    <section id="how-it-works" class="how-it-works">
+      <h2 class="section-title">How it works</h2>
+      <div class="steps">
+        <div class="step">
+          <div class="step-number">1</div>
+          <h3>Search a company</h3>
+          <p>LinkDogger resolves the company and gathers publicly discoverable employees from your chosen provider.</p>
+        </div>
+        <div class="step">
+          <div class="step-number">2</div>
+          <h3>Profiles are enriched</h3>
+          <p>LinkedIn, GitHub, X and website signals are merged into a single profile per person.</p>
+        </div>
+        <div class="step">
+          <div class="step-number">3</div>
+          <h3>Networking signals</h3>
+          <p>Follow-back likelihood, influence and activity scores help you decide who is worth reaching out to.</p>
+        </div>
+      </div>
+    </section>
   </main>
 
-  <footer class="app-footer">
-    <p>Only publicly available information is used. Networking scores are estimates, not facts.</p>
+  <footer class="footer">
+    <div class="footer-inner">
+      <div class="footer-brand">
+        <img src="/static/favicon.svg" alt="" width="22" height="22">
+        <span>LinkDogger</span>
+      </div>
+      <p class="footer-note">
+        Networking scores are estimates and predictions, not factual statements.
+        All data comes from public profiles.
+      </p>
+      <p class="footer-links">
+        <a href="https://github.com/AbhiDevkota/LinkDogger" target="_blank" rel="noopener">GitHub</a>
+        <span class="footer-dot">·</span>
+        <span>v1.0</span>
+      </p>
+    </div>
   </footer>
 
-  <script src="/static/app.js"></script>
+  <script src="/static/app.js" defer></script>
 </body>
 </html>

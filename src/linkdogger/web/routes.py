@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
+from linkdogger.services.factory import VALID_PROVIDERS, build_people_service
 from linkdogger.services.people_service import PeopleService
 from linkdogger.services.processing import ResultFilters, SortKey
 
@@ -34,15 +35,29 @@ def register_routes(
         role: str | None = None,
         location: str | None = None,
         limit: int | None = None,
+        provider: str | None = None,
     ) -> dict:
         """Run a search through the shared application core."""
+        if provider is not None and provider not in VALID_PROVIDERS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"invalid provider '{provider}' "
+                f"(expected {', '.join(VALID_PROVIDERS)})",
+            )
+
+        # The web interface defaults to the configured discovery backend,
+        # but lets the visitor pick a provider per search.
+        search_service = service
+        if provider is not None and provider != app.state.settings.discovery_backend:
+            search_service = build_people_service(app.state.settings, provider=provider)
+
         try:
             sort_key = SortKey.from_option(sort)
         except ValueError:
             logger.warning("Ignoring invalid sort '%s'", sort)
             sort_key = None
 
-        result = service.search_company(
+        result = search_service.search_company(
             company,
             sort=sort_key,
             filters=ResultFilters(role=role, location=location),
