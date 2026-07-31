@@ -72,6 +72,13 @@ class FakeLinkedin(FakeClient):
             }
         )
 
+    def get_user_profile(self, use_cache=True) -> dict:
+        return {
+            "firstName": "Test",
+            "lastName": "User",
+            "publicIdentifier": "testuser",
+        }
+
 
 def _install_fake_linkedin_api(monkeypatch: pytest.MonkeyPatch) -> None:
     package = types.ModuleType("open_linkedin_api")
@@ -96,6 +103,9 @@ def _install_fake_linkedin_api(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeClient.company_lookups = []
     FakeClient.people_search_calls = []
     FakeLinkedin.instances = []
+    import linkdogger.linkedin_api
+
+    linkdogger.linkedin_api._VALIDATED_SESSIONS.clear()  # noqa: SLF001
 
 
 def _settings(**overrides) -> Settings:

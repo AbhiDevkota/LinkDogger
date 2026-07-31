@@ -74,18 +74,20 @@ def get_linkedin_client(
     cookies_dir: str | None = None,
     cookie_file: str | None = None,
     timeout: float | None = None,
+    validate: bool = True,
 ) -> Any:
     """Return an authenticated ``open_linkedin_api.Linkedin`` client.
 
     A session cookie file (``li_at`` + ``JSESSIONID``, created by
-    ``linkdogger linkedin-login``) takes priority; email/password login
-    is the fallback. Raises ``SourceUnavailableError`` with an honest
-    reason when the library is missing, no auth is configured, or login
-    fails.
+    ``linkdogger login``) takes priority; email/password login is the
+    fallback. Raises ``SourceUnavailableError`` with an honest reason
+    when the library is missing, no auth is configured, or login fails.
 
     ``timeout`` is injected as a default for the library's HTTP calls —
     the library itself does not set one, so without it a dead connection
-    would hang forever.
+    would hang forever. With ``validate`` (default), the cookie session
+    is checked with a cheap ``/me`` call once per process and the result
+    is logged, so a stale session is reported before discovery runs.
     """
     try:
         from open_linkedin_api import Linkedin
@@ -100,7 +102,10 @@ def get_linkedin_client(
     if cookie_file:
         cookies = _cookies_from_file(cookie_file)
         logger.info("Using LinkedIn session cookies from %s", cookie_file)
-        return _with_session_timeout(Linkedin("", "", cookies=cookies), timeout)
+        client = _with_session_timeout(Linkedin("", "", cookies=cookies), timeout)
+        if validate:
+            _validate_cookie_session(client, cookie_file)
+        return client
 
     if not email or not password:
         raise SourceUnavailableError(NO_CREDENTIALS_MESSAGE)
@@ -148,6 +153,58 @@ def _with_session_timeout(client: Any, timeout: float | None) -> Any:
 
     session.request = request
     return client
+
+
+_VALIDATED_SESSIONS: set[str] = set()
+
+
+def validate_session(client: Any) -> str | None:
+    """Verify the session with a cheap ``/me`` call.
+
+    The cookie path skips the library's login flow, so nothing verifies
+    the session until a search fails. This returns a short summary of
+    who the session belongs to (``Name (@handle)``) or ``None`` when
+    the check failed — the reason is logged as a warning.
+    """
+    try:
+        me = client.get_user_profile(use_cache=False)
+    except Exception as exc:  # noqa: BLE001 - session failures are varied
+        logger.warning("LinkedIn session validation failed: %s", exc)
+        return None
+    if not isinstance(me, dict):
+        return "session active"
+    name = " ".join(
+        part
+        for part in (
+            _text_value(me.get("firstName")),
+            _text_value(me.get("lastName")),
+        )
+        if part
+    )
+    handle = me.get("publicIdentifier")
+    if name and handle:
+        return f"{name} (@{handle})"
+    if handle:
+        return f"@{handle}"
+    if name:
+        return name
+    return "session active"
+
+
+def _validate_cookie_session(client: Any, cookie_file: str) -> None:
+    """Validate the cookie session once per process (one extra request)."""
+    key = f"cookies:{Path(cookie_file).resolve()}"
+    if key in _VALIDATED_SESSIONS:
+        return
+    _VALIDATED_SESSIONS.add(key)
+    summary = validate_session(client)
+    if summary:
+        logger.info("LinkedIn session validated: %s", summary)
+    else:
+        logger.warning(
+            "LinkedIn session could not be validated; searches may fail "
+            "or fall back to unverified slug URLs"
+        )
 
 
 def get_profile(
@@ -205,25 +262,26 @@ def _dash_profile(client: Any, identifier: str | None) -> dict[str, Any]:
     return _map_dash_profile(elements[0])
 
 
+def _text_value(value: Any) -> str | None:
+    """Plain text from a Voyager value (plain string or ``{"text": ...}``)."""
+    if isinstance(value, str) and value:
+        return value
+    if isinstance(value, dict):
+        for key in ("text", "localized"):
+            text = value.get(key)
+            if isinstance(text, str) and text:
+                return text
+    return None
+
+
 def _map_dash_profile(element: dict[str, Any]) -> dict[str, Any]:
     """Map a Dash profile element onto the keys the enricher consumes."""
-
-    def _text(value: Any) -> str | None:
-        if isinstance(value, str) and value:
-            return value
-        if isinstance(value, dict):
-            for key in ("text", "localized"):
-                text = value.get(key)
-                if isinstance(text, str) and text:
-                    return text
-        return None
-
     profile = {
-        "firstName": _text(element.get("firstName")),
-        "lastName": _text(element.get("lastName")),
-        "headline": _text(element.get("headline")),
-        "summary": _text(element.get("summary")),
-        "locationName": _text(element.get("locationName")),
+        "firstName": _text_value(element.get("firstName")),
+        "lastName": _text_value(element.get("lastName")),
+        "headline": _text_value(element.get("headline")),
+        "summary": _text_value(element.get("summary")),
+        "locationName": _text_value(element.get("locationName")),
         "public_id": element.get("publicIdentifier"),
     }
     if not any((profile["firstName"], profile["lastName"], profile["headline"])):

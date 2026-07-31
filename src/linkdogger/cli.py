@@ -9,6 +9,8 @@ from rich.console import Console
 
 from linkdogger import __version__
 from linkdogger.config.settings import get_settings
+from linkdogger.errors import SourceUnavailableError
+from linkdogger.linkedin_api import get_linkedin_client, validate_session
 from linkdogger.output.export import export_result
 from linkdogger.output.json import render_json
 from linkdogger.output.table import render_table
@@ -205,17 +207,13 @@ def search(
     console.print("[dim]Use --json for machine-readable output.[/dim]")
 
 
-@app.command("linkedin-login")
-def linkedin_login() -> None:
-    """Save your LinkedIn session cookies for the LinkedIn provider.
+@app.command()
+def serve() -> None:
+    """Start the local web dashboard (same as ``linkdogger --web``)."""
+    _run_web()
 
-    Log in once in your normal browser, then paste the ``li_at`` and
-    ``JSESSIONID`` cookie values here. They are saved to the cookie file
-    configured in ``LINKDOGGER_LINKEDIN_COOKIE_FILE`` and used by the
-    LinkedIn provider (``open-linkedin-api``) instead of a password
-    login — useful when LinkedIn challenges password logins. The file
-    holds live session cookies: it is yours, never shared or committed.
-    """
+
+def _linkedin_login() -> None:
     settings = get_settings()
     cookie_file = settings.linkedin_cookie_file
     if not cookie_file:
@@ -238,3 +236,144 @@ def linkedin_login() -> None:
     except OSError as exc:
         raise typer.BadParameter(f"could not write cookie file: {exc}") from None
     console.print(f"[green]Session cookies saved to {cookie_file}[/green]")
+    try:
+        client = get_linkedin_client(
+            None, None, cookie_file=cookie_file, validate=False
+        )
+    except SourceUnavailableError as exc:
+        console.print(
+            f"[yellow]Warning:[/yellow] cookies saved, but the session could "
+            f"not be checked now: {exc}"
+        )
+        return
+    summary = validate_session(client)
+    if summary:
+        console.print(
+            f"[green]Session validated: {summary}[/green] — "
+            "LinkedIn API access confirmed."
+        )
+    else:
+        console.print(
+            "[yellow]Warning:[/yellow] cookies saved, but LinkedIn did not "
+            "confirm the session (it may be blocking automated access right "
+            "now). Re-run this command later; searches will fall back to "
+            "unverified results meanwhile."
+        )
+
+
+@app.command("login")
+def login() -> None:
+    """Save your LinkedIn session cookies (shortcut for ``linkedin-login``)."""
+    _linkedin_login()
+
+
+@app.command("linkedin-login")
+def linkedin_login() -> None:
+    """Save your LinkedIn session cookies.
+
+    Log in once in your normal browser, then paste the ``li_at`` and
+    ``JSESSIONID`` cookie values here. They are saved to the cookie file
+    configured in ``LINKDOGGER_LINKEDIN_COOKIE_FILE`` and used by the
+    LinkedIn provider (``open-linkedin-api``) instead of a password
+    login — useful when LinkedIn challenges password logins. The file
+    holds live session cookies: it is yours, never shared or committed.
+    The saved session is validated with a live API call and the result
+    is reported.
+    """
+    _linkedin_login()
+
+
+def _redact(value: str | None) -> str:
+    """Redact a secret for display (``set (abc***)`` or ``(not set)``)."""
+    if not value:
+        return "(not set)"
+    return f"set ({value[:3]}***)"
+
+
+@app.command()
+def config() -> None:
+    """Show the effective configuration (secrets are redacted)."""
+    settings = get_settings()
+    fields = [
+        ("LINKDOGGER_DISCOVERY_BACKEND", settings.discovery_backend),
+        ("LINKDOGGER_LOG_LEVEL", settings.log_level),
+        ("LINKDOGGER_MAX_RESULTS", str(settings.max_results)),
+        ("LINKDOGGER_WEB_HOST", settings.web_host),
+        ("LINKDOGGER_WEB_PORT", str(settings.web_port)),
+        ("LINKDOGGER_REQUEST_TIMEOUT_SECONDS", str(settings.request_timeout_seconds)),
+        (
+            "LINKDOGGER_GITHUB_EMAIL_PATCH_TIMEOUT_SECONDS",
+            str(settings.github_email_patch_timeout_seconds),
+        ),
+        ("LINKDOGGER_GITHUB_TOKEN", _redact(settings.github_token)),
+        ("LINKDOGGER_LINKEDIN_EMAIL", settings.linkedin_email or "(not set)"),
+        ("LINKDOGGER_LINKEDIN_PASSWORD", _redact(settings.linkedin_password)),
+        (
+            "LINKDOGGER_LINKEDIN_COOKIES_DIR",
+            settings.linkedin_cookies_dir or "(not set)",
+        ),
+        (
+            "LINKDOGGER_LINKEDIN_COOKIE_FILE",
+            settings.linkedin_cookie_file or "(not set)",
+        ),
+    ]
+    for name, value in fields:
+        console.print(f"  [bold]{name}[/bold] = {value}")
+
+
+@app.command()
+def doctor() -> None:
+    """Diagnose the installation: providers, credentials, and the LinkedIn session."""
+    settings = get_settings()
+    console.print("[bold cyan]LinkDogger[/bold cyan] diagnostics")
+    console.print(f"  Version: {__version__}")
+    console.print(f"  Log level: {settings.log_level}")
+    console.print()
+    console.print("[bold]Providers[/bold]")
+    console.print("  [green]mock[/green]      available (offline sample data)")
+    if settings.github_token:
+        console.print("  github    token configured")
+    else:
+        console.print(
+            "  github    [yellow]no token[/yellow] (set LINKDOGGER_GITHUB_TOKEN)"
+        )
+    console.print("  x         unavailable (no official public API)")
+    linkedin_configured = bool(
+        settings.linkedin_cookie_file
+        or (settings.linkedin_email and settings.linkedin_password)
+    )
+    if settings.linkedin_cookie_file:
+        console.print(f"  linkedin  cookie file: {settings.linkedin_cookie_file}")
+    elif settings.linkedin_email and settings.linkedin_password:
+        console.print("  linkedin  credentials configured (email login)")
+    else:
+        console.print(
+            "  linkedin  [yellow]not configured[/yellow] (run `linkdogger "
+            "login` or set LINKDOGGER_LINKEDIN_EMAIL/PASSWORD)"
+        )
+    if linkedin_configured:
+        try:
+            client = get_linkedin_client(
+                settings.linkedin_email,
+                settings.linkedin_password,
+                settings.linkedin_cookies_dir,
+                settings.linkedin_cookie_file,
+                timeout=settings.request_timeout_seconds,
+                validate=False,
+            )
+        except SourceUnavailableError as exc:
+            console.print(f"  linkedin  [yellow]session check failed:[/yellow] {exc}")
+        else:
+            summary = validate_session(client)
+            if summary:
+                console.print(f"  linkedin  [green]session valid:[/green] {summary}")
+            else:
+                console.print(
+                    "  linkedin  [yellow]session could not be validated[/yellow] "
+                    "(LinkedIn may be blocking automated access right now)"
+                )
+    console.print()
+    console.print("[bold]Web dashboard[/bold]")
+    console.print(
+        f"  Run `linkdogger serve` (http://{settings.web_host}:{settings.web_port})"
+    )

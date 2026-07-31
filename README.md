@@ -131,12 +131,32 @@ calls.
 
 ## Usage
 
-### Help and version
+### Help, version and diagnostics
 
 ```bash
-linkdogger --help
+linkdogger --help                  # all commands and options
 linkdogger --version
+linkdogger doctor                  # diagnose providers, credentials, LinkedIn session
+linkdogger config                  # show effective settings (secrets redacted)
+linkdogger serve                   # local web dashboard (same as linkdogger --web)
 ```
+
+`linkdogger doctor` validates a configured LinkedIn session live (via the
+Voyager `/me` endpoint) and reports who it belongs to — or why it could not
+be validated (expired cookies, login challenge, LinkedIn blocking automated
+access). The same check runs automatically during searches: a cookie-session
+result is logged (`LinkedIn session validated: ...` / a warning otherwise),
+once per process.
+
+### Manage your LinkedIn session
+
+```bash
+linkdogger login                    # paste li_at + JSESSIONID, saves and validates the session
+linkdogger linkedin-login           # same, longer name
+```
+
+The saved session is checked with a live API call and the outcome is
+reported (`Session validated: ...` or a warning).
 
 ### Search for a company
 
@@ -216,7 +236,7 @@ linkdogger search "OpenAI" --export results.md
 ### Web dashboard
 
 ```bash
-linkdogger --web
+linkdogger serve        # or: linkdogger --web
 ```
 
 Serves a local dashboard at `http://127.0.0.1:8000` (see configuration above)

@@ -99,6 +99,14 @@ class FakeLinkedin(FakeClient):
             raise FakeLinkedin.errors.pop(0)
         self.client = FakeLibraryClient()
 
+    def get_user_profile(self, use_cache=True) -> dict:
+        FakeClient.calls.append(("me", None, None))
+        return {
+            "firstName": "Test",
+            "lastName": "User",
+            "publicIdentifier": "testuser",
+        }
+
 
 class FakeLibrarySession:
     calls: list[tuple[str, str, dict]] = []
@@ -137,6 +145,9 @@ def _install_fake_linkedin_api(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeClient.dash_profiles = {}
     FakeClient.dash_errors = []
     FakeClient.dash_fetch_calls = []
+    import linkdogger.linkedin_api
+
+    linkdogger.linkedin_api._VALIDATED_SESSIONS.clear()  # noqa: SLF001
 
 
 def _person_with_linkedin() -> PersonProfile:
@@ -486,6 +497,46 @@ def test_no_timeout_wrapper_without_value(monkeypatch: pytest.MonkeyPatch) -> No
     client = get_linkedin_client("me@acme.com", "pw")
     client.client.session.request("GET", "https://example.com")
     assert "timeout" not in FakeLibrarySession.calls[-1][2]
+
+
+def test_validate_session_reports_identity(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    from linkdogger.linkedin_api import get_linkedin_client, validate_session
+
+    client = get_linkedin_client("me@acme.com", "pw")
+    assert validate_session(client) == "Test User (@testuser)"
+
+
+def test_validate_session_reports_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    from linkdogger.linkedin_api import get_linkedin_client, validate_session
+
+    client = get_linkedin_client("me@acme.com", "pw")
+
+    def boom(use_cache=True) -> None:
+        raise RuntimeError("Exceeded 30 redirects.")
+
+    client.get_user_profile = boom
+    assert validate_session(client) is None
+
+
+def test_cookie_session_validated_once_per_process(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    from linkdogger.linkedin_api import get_linkedin_client
+
+    cookie_file = tmp_path / "linkedin-cookies.json"
+    cookie_file.write_text(
+        json.dumps({"li_at": "abc123", "JSESSIONID": "ajax:xyz"}),
+        encoding="utf-8",
+    )
+    get_linkedin_client(None, None, cookie_file=str(cookie_file))
+    get_linkedin_client(None, None, cookie_file=str(cookie_file))
+    assert FakeLinkedin.instances[0]["cookies"] is not None
+    me_calls = [c for c in FakeClient.calls if c[0] == "me"]
+    assert len(me_calls) == 1
+    assert len(FakeLinkedin.instances) == 2
 
 
 def test_profile_falls_back_to_dash_when_library_endpoint_is_retired(
