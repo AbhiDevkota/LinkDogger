@@ -68,7 +68,7 @@ def linkedin_launch_options() -> dict[str, object]:
     }
 
 
-def _hide_automation_flags(manager: object) -> None:
+def hide_automation_flags(manager: object) -> None:
     """Hide ``navigator.webdriver`` on the live browser context.
 
     ``load_session`` recreates the browser context, so this must run
@@ -147,7 +147,7 @@ class LinkedInEnricher:
 
         skipped = 0
         await browser_manager.load_session(self._session_file)
-        _hide_automation_flags(browser_manager)
+        hide_automation_flags(browser_manager)
         scraper = linkedin_scraper.PersonScraper(browser_manager.page)
         for person in people:
             url = self._linkedin_url(person)

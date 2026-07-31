@@ -85,21 +85,30 @@ class LinkedInCompanyDiscoverer(CompanyDiscoverer):
             async def scrape() -> Company | None:
                 from linkedin_scraper import BrowserManager
 
-                async with BrowserManager(headless=self._headless) as browser:
+                from linkdogger.enrichment.linkedin import (
+                    hide_automation_flags,
+                    linkedin_launch_options,
+                )
+
+                async with BrowserManager(
+                    headless=self._headless, **linkedin_launch_options()
+                ) as browser:
                     await browser.load_session(self._session_file)
+                    hide_automation_flags(browser)
                     scraper = CompanyScraper(browser.page)
                     company = await scraper.scrape(url)
                     return Company(
                         name=company.name,
                         aliases=[company.name.lower().replace(" ", "-")],
-                        description=company.about,
+                        description=getattr(company, "about", None),
                         source="linkedin-scraper",
                         resolved_from=url,
                     )
 
             return asyncio.run(scrape())
-        except SourceUnavailableError:
-            raise
+        except SourceUnavailableError as exc:
+            logger.warning("LinkedIn company verification unavailable: %s", exc)
+            return None
         except Exception as exc:  # noqa: BLE001 - scraper raises many error types
             logger.warning("LinkedIn company verification failed: %s", exc)
             return None
