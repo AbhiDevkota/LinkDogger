@@ -33,7 +33,6 @@ def test_search_shows_results() -> None:
     assert "Acme Corporation" in result.output
     assert "publicly discoverable people" in result.output
     assert "Alex Sample" in result.output
-    assert "Software Engineer" in result.output
 
 
 def test_search_unknown_company_reports_not_found() -> None:

@@ -22,6 +22,7 @@ from linkdogger.matching.identity import IdentityMatcher
 from linkdogger.models.company import Company
 from linkdogger.models.person import PersonProfile
 from linkdogger.models.search import SearchResult
+from linkdogger.scoring.networking import NetworkingScorer
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +43,14 @@ class PeopleService:
         people_discoverer: PeopleDiscoverer,
         enrichers: Sequence[Enricher] = (),
         identity_matcher: IdentityMatcher | None = None,
+        networking_scorer: NetworkingScorer | None = None,
     ) -> None:
         self._settings = settings
         self._company_discoverer = company_discoverer
         self._people_discoverer = people_discoverer
         self._enrichers = list(enrichers)
         self._identity_matcher = identity_matcher or IdentityMatcher()
+        self._networking_scorer = networking_scorer or NetworkingScorer()
 
     def search_company(self, company_query: str) -> SearchResult:
         """Discover publicly discoverable people for ``company_query``."""
@@ -66,6 +69,9 @@ class PeopleService:
 
         people = self._match_people(people)
         logger.info("Identity matching complete: %d people", len(people))
+
+        people = self._score_people(people)
+        logger.info("Networking scores calculated for %d people", len(people))
 
         return SearchResult(
             query=company_query,
@@ -131,6 +137,11 @@ class PeopleService:
 
     def _match_people(self, people: list[PersonProfile]) -> list[PersonProfile]:
         return self._identity_matcher.match_people(people)
+
+    def _score_people(self, people: list[PersonProfile]) -> list[PersonProfile]:
+        for person in people:
+            person.networking = self._networking_scorer.score(person)
+        return people
 
     def _empty_result(self, company_query: str) -> SearchResult:
         return SearchResult(
