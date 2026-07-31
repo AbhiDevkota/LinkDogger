@@ -214,7 +214,7 @@ def test_people_discovery_uses_company_urn(
         {
             "urn_id": "99",
             "name": "Alice A",
-            "jobtitle": "Engineer",
+            "jobtitle": "Engineer at Acme",
             "location": "Berlin",
         }
     ]
@@ -223,7 +223,7 @@ def test_people_discovery_uses_company_urn(
     assert len(people) == 1
     person = people[0]
     assert person.name == "Alice A"
-    assert person.position == "Engineer"
+    assert person.position == "Engineer at Acme"
     assert person.location == "Berlin"
     assert person.sources == ["linkedin-api"]
     linkedin = person.profiles["linkedin"]
@@ -256,6 +256,24 @@ def test_people_discovery_falls_back_to_keywords(
     ]
 
 
+def test_people_discovery_filters_unrelated_headlines(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Only people whose headline names the company are kept."""
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.people = [
+        {"urn_id": "1", "name": "Alice A", "jobtitle": "Software Engineer at Acme"},
+        {"urn_id": "2", "name": "Bob B", "jobtitle": "Interested in AI"},
+        {"urn_id": "3", "name": "Carol C", "jobtitle": "Studied at MIT"},
+        {"urn_id": "4", "name": "Dan D", "jobtitle": "Student at school"},
+        {"urn_id": "5", "name": "Eve E", "jobtitle": "Gmail at Acme"},
+        {"urn_id": "6", "name": "Frank F", "jobtitle": None},
+    ]
+    discoverer = LinkedInPeopleDiscoverer(_settings(**_creds()))
+    people = discoverer.discover_people(_company(aliases=["1234", "acme"]))
+    assert [p.name for p in people] == ["Alice A", "Eve E"]
+
+
 def test_people_discovery_requires_credentials() -> None:
     discoverer = LinkedInPeopleDiscoverer(_settings())
     with pytest.raises(SourceUnavailableError, match="credentials"):
@@ -267,8 +285,8 @@ def test_people_discovery_skips_nameless_results(
 ) -> None:
     _install_fake_linkedin_api(monkeypatch)
     FakeClient.people = [
-        {"urn_id": "1", "name": "Alice A", "jobtitle": "Engineer"},
-        {"urn_id": "2", "name": None, "jobtitle": "Engineer"},
+        {"urn_id": "1", "name": "Alice A", "jobtitle": "Engineer at Acme"},
+        {"urn_id": "2", "name": None, "jobtitle": "Engineer at Acme"},
     ]
     discoverer = LinkedInPeopleDiscoverer(_settings(**_creds()))
     people = discoverer.discover_people(_company(aliases=["1234", "acme"]))
@@ -290,7 +308,9 @@ def test_people_discovery_with_cookie_file(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _install_fake_linkedin_api(monkeypatch)
-    FakeClient.people = [{"urn_id": "1", "name": "Alice A", "jobtitle": "Engineer"}]
+    FakeClient.people = [
+        {"urn_id": "1", "name": "Alice A", "jobtitle": "Engineer at Acme"}
+    ]
     cookie_file = tmp_path / "linkedin-cookies.json"
     cookie_file.write_text(
         json.dumps({"li_at": "abc123", "JSESSIONID": "ajax:xyz"}),

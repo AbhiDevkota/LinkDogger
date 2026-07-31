@@ -13,7 +13,9 @@ With credentials the provider can now do full LinkedIn discovery:
 * people are discovered through ``search_people``, filtered to the
   company's URN id when available — including out-of-network members,
   which is everyone for a public-discovery tool (the library respects
-  LinkedIn's rate limits by sleeping between requests).
+  LinkedIn's rate limits by sleeping between requests). Results whose
+  headline does not name the company (``Interested in ...``, ``Studied
+  at ...`` and similar loose matches) are dropped.
 
 Without credentials, company resolution falls back to the slug-derived
 URL (honestly marked ``linkedin-slug``) and people discovery reports
@@ -163,6 +165,8 @@ class LinkedInPeopleDiscoverer(PeopleDiscoverer):
             ) from exc
         people = []
         for item in results:
+            if not _headline_names_company(item, company):
+                continue
             name = item.get("name")
             if not name:
                 continue
@@ -199,6 +203,22 @@ class LinkedInPeopleDiscoverer(PeopleDiscoverer):
         if urn_id is not None:
             return client.search_people(current_company=[urn_id], **kwargs)
         return client.search_people(keywords=company.name, **kwargs)
+
+
+def _headline_names_company(item: dict[str, Any], company: Company) -> bool:
+    """Keep only results whose headline actually names the company.
+
+    LinkedIn's people search matches loosely: ``Interested in ...``,
+    ``Studied at ...`` and unrelated headlines slip through, so a
+    result is kept only when the company name (or one of its aliases)
+    appears in the headline.
+    """
+    title = (item.get("jobtitle") or "").lower()
+    if not title:
+        return False
+    names = [company.name]
+    names.extend(alias for alias in company.aliases if not alias.isdigit())
+    return any(name.lower() in title for name in names)
 
 
 def _company_urn_id(company: Company) -> str | None:
