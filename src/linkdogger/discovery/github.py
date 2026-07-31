@@ -65,8 +65,11 @@ class GitHubClient:
     def close(self) -> None:
         self._client.close()
 
-    def get_json(self, path: str) -> dict | list:
+    def get_json(self, path: str, accept: str | None = None) -> dict | list:
         """GET ``path`` and return parsed JSON.
+
+        ``accept`` overrides the default ``Accept`` header, e.g. for
+        endpoints that require a preview media type.
 
         Raises:
             RateLimitError: provider rate limit reached (never evaded).
@@ -74,9 +77,10 @@ class GitHubClient:
             ProviderError: transport or HTTP errors, malformed responses.
         """
         last_error: LinkDoggerError | None = None
+        headers = {"Accept": accept} if accept else None
         for attempt in range(MAX_RETRIES + 1):
             try:
-                response = self._client.get(path)
+                response = self._client.get(path, headers=headers)
             except httpx.TimeoutException as exc:
                 last_error = NetworkTimeoutError(f"GitHub request timed out: {path}")
                 logger.warning("GitHub timeout on %s (attempt %d)", path, attempt + 1)

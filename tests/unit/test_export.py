@@ -91,6 +91,47 @@ def test_render_csv_flattens_missing_fields_to_dash() -> None:
     rows = list(csv.DictReader(io.StringIO(render_csv(result))))
     assert rows[0]["followers"] == "-"
     assert rows[0]["networking_score"] == "-"
+    assert rows[0]["email"] == "-"
+
+
+def test_render_csv_includes_email_column() -> None:
+    result = SearchResult(
+        query="Acme",
+        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        count=1,
+        results=[
+            PersonProfile(name="Alice", company="Acme", email="alice@example.com")
+        ],
+    )
+    rows = list(csv.DictReader(io.StringIO(render_csv(result))))
+    assert rows[0]["email"] == "alice@example.com"
+
+
+def test_render_markdown_includes_email_and_accounts() -> None:
+    result = SearchResult(
+        query="Acme",
+        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        count=1,
+        results=[
+            PersonProfile(
+                name="Alice",
+                company="Acme",
+                email="alice@example.com",
+                profiles={
+                    "github": SocialProfile(
+                        platform="github",
+                        url="https://github.com/alice-dev",
+                        username="alice-dev",
+                        source="test",
+                    )
+                },
+            )
+        ],
+    )
+    text = render_markdown(result)
+    assert "| Email |" in text
+    assert "alice@example.com" in text
+    assert "[github](https://github.com/alice-dev)" in text
 
 
 def test_render_markdown_escapes_pipes() -> None:
