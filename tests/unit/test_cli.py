@@ -28,7 +28,7 @@ def test_no_args_shows_help() -> None:
 
 
 def test_search_shows_results() -> None:
-    result = runner.invoke(app, ["search", "Acme"])
+    result = runner.invoke(app, ["search", "Acme", "--provider", "mock"])
     assert result.exit_code == 0
     assert "Acme Corporation" in result.output
     assert "publicly discoverable people" in result.output
@@ -36,20 +36,20 @@ def test_search_shows_results() -> None:
 
 
 def test_search_unknown_company_reports_not_found() -> None:
-    result = runner.invoke(app, ["search", "Nonexistent Company"])
+    result = runner.invoke(app, ["search", "Nonexistent Company", "--provider", "mock"])
     assert result.exit_code == 1
     assert "Company not found" in result.output
 
 
 def test_search_with_log_shows_results() -> None:
-    result = runner.invoke(app, ["search", "Acme", "--log"])
+    result = runner.invoke(app, ["search", "Acme", "--log", "--provider", "mock"])
     assert result.exit_code == 0
     assert "Acme Corporation" in result.output
     assert "Alex Sample" in result.output
 
 
 def test_search_json_output() -> None:
-    result = runner.invoke(app, ["search", "Acme", "--json"])
+    result = runner.invoke(app, ["search", "Acme", "--json", "--provider", "mock"])
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["schema_version"] == "1.0"
@@ -60,7 +60,9 @@ def test_search_json_output() -> None:
 
 
 def test_search_json_unknown_company() -> None:
-    result = runner.invoke(app, ["search", "Nonexistent Company", "--json"])
+    result = runner.invoke(
+        app, ["search", "Nonexistent Company", "--json", "--provider", "mock"]
+    )
     assert result.exit_code == 0
     payload = json.loads(result.output)
     assert payload["company"] is None
@@ -71,3 +73,30 @@ def test_search_missing_company_errors() -> None:
     result = runner.invoke(app, ["search"])
     assert result.exit_code != 0
     assert "Missing argument" in result.output
+
+
+def test_search_invalid_provider_errors() -> None:
+    result = runner.invoke(app, ["search", "Acme", "--provider", "bogus"])
+    assert result.exit_code != 0
+    assert "invalid provider" in result.output
+
+
+def test_hybrid_flag_is_shorthand_for_hybrid_provider() -> None:
+    result = runner.invoke(app, ["search", "Acme", "--hybrid", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert "warnings" in payload
+
+
+def test_linkedin_provider_reports_discovery_gap() -> None:
+    result = runner.invoke(app, ["search", "Microsoft", "--json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.output)
+    assert payload["count"] == 0
+    assert any("LinkedIn" in w for w in payload["warnings"])
+
+
+def test_linkedin_login_without_session_file_errors() -> None:
+    result = runner.invoke(app, ["linkedin-login"])
+    assert result.exit_code != 0
+    assert "LINKDOGGER_LINKEDIN_SESSION_FILE" in result.output

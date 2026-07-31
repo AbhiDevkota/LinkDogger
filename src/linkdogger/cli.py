@@ -26,19 +26,23 @@ app = typer.Typer(
 console = Console()
 
 
-def _build_people_service() -> PeopleService:
-    """Build the application service from the configured backend.
-
-    Defaults to clearly marked sample data (mock backend) until the
-    GitHub backend is configured via ``LINKDOGGER_DISCOVERY_BACKEND``.
-    """
-    return build_people_service(get_settings())
+def _build_people_service(provider: str | None = None) -> PeopleService:
+    """Build the application service for the selected provider."""
+    return build_people_service(get_settings(), provider=provider)
 
 
 def _version_callback(value: bool) -> None:
     if value:
         typer.echo(f"LinkDogger {__version__}")
         raise typer.Exit()
+
+
+def _print_warnings(result: object) -> None:
+    """Print non-fatal warnings collected during the search."""
+    warnings = getattr(result, "warnings", None)
+    if warnings:
+        for warning in warnings:
+            console.print(f"[yellow]Warning:[/yellow] {warning}")
 
 
 def _run_web() -> None:
@@ -116,6 +120,16 @@ def search(
     limit: int | None = typer.Option(
         None, "--limit", help="Maximum number of results to show."
     ),
+    provider: str = typer.Option(
+        "linkedin",
+        "--provider",
+        help="Data provider: linkedin (default), github, hybrid, or mock.",
+    ),
+    hybrid: bool = typer.Option(
+        False,
+        "--hybrid",
+        help="Use GitHub and LinkedIn together (shortcut for --provider hybrid).",
+    ),
     export: Path | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
         None, "--export", help="Write results to a file (.json, .csv or .md)."
     ),
@@ -123,6 +137,13 @@ def search(
     """Discover publicly discoverable people associated with COMPANY."""
     if not log_output:
         logging.getLogger().setLevel(logging.WARNING)
+
+    if hybrid:
+        provider = "hybrid"
+    if provider not in ("linkedin", "github", "hybrid", "mock"):
+        raise typer.BadParameter(
+            f"invalid provider '{provider}' (expected linkedin, github, hybrid or mock)"
+        )
 
     sort_key: tuple[SortKey, str] | None = None
     if sort is not None:
@@ -136,7 +157,7 @@ def search(
             ) from None
 
     filters = ResultFilters(role=role, location=location)
-    service = _build_people_service()
+    service = _build_people_service(provider)
 
     if log_output or json_output:
         result = service.search_company(
@@ -172,6 +193,45 @@ def search(
         console.print(f"[bold]Domain:[/bold] {result.company.domain}")
     console.print(f"Found [bold]{result.count}[/bold] publicly discoverable people")
     console.print()
+    _print_warnings(result)
     console.print(render_table(result))
     console.print()
     console.print("[dim]Use --json for machine-readable output.[/dim]")
+
+
+@app.command("linkedin-login")
+def linkedin_login() -> None:
+    """Log in to LinkedIn in a browser and save an authenticated session.
+
+    The saved session file (see ``LINKDOGGER_LINKEDIN_SESSION_FILE``)
+    is reused by the LinkedIn provider; it is your own session and is
+    never shared or committed.
+    """
+    settings = get_settings()
+    session_file = settings.linkedin_session_file
+    if not session_file:
+        raise typer.BadParameter(
+            "set LINKDOGGER_LINKEDIN_SESSION_FILE first (see .env.example)"
+        )
+    try:
+        import asyncio
+
+        from linkedin_scraper import BrowserManager, wait_for_manual_login
+    except ImportError:
+        raise typer.BadParameter(
+            "linkedin-scraper is not installed; install it with "
+            "`pip install -e '.[linkedin]'` (and `playwright install chromium`)"
+        ) from None
+
+    async def _login() -> None:
+        async with BrowserManager(headless=False) as browser:
+            console.print("Opening LinkedIn login...")
+            await browser.page.goto("https://www.linkedin.com/login")
+            console.print(
+                "Please log in in the opened browser window (you have 5 minutes)."
+            )
+            await wait_for_manual_login(browser.page, timeout=300)
+            await browser.save_session(session_file)
+            console.print(f"[green]Session saved to {session_file}[/green]")
+
+    asyncio.run(_login())

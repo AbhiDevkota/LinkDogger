@@ -26,6 +26,10 @@ dev = [
     "ruff>=0.9",
     "mypy>=1.14",
 ]
+linkedin = [
+    "linkedin-scraper>=3.0",
+    "playwright>=1.40",
+]
 
 [project.scripts]
 linkdogger = "linkdogger.cli:app"
@@ -56,6 +60,10 @@ no_implicit_optional = true
 strict_optional = true
 disallow_untyped_defs = true
 check_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = ["linkedin_scraper.*"]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

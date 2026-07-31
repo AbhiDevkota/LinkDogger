@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     max_results: int = 100
     discovery_backend: Literal["mock", "github"] = "mock"
     github_token: str | None = None
+    linkedin_session_file: str | None = None
+    linkedin_headless: bool = True
 
 
 @lru_cache

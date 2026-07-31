@@ -16,8 +16,12 @@ the results through both a CLI and an optional local web dashboard.
 - Only publicly available information is used, through legitimate access
   methods (official APIs preferred when available).
 - No authentication bypass, no CAPTCHA circumvention, no rate-limit evasion,
-  no scraping of private profiles, no fabrication of follower counts or
-  social accounts.
+  no fabrication of follower counts or social accounts.
+- The optional LinkedIn provider uses **your own authenticated session**
+  (`linkdogger linkedin-login`) in a real browser and only reads profile
+  pages you choose to enrich; the session file is yours, never shared or
+  committed, and scraping is rate-limited. Understand and accept LinkedIn's
+  terms before using it — use at your own risk.
 - Unverifiable information is marked unavailable (`null`), never guessed.
 - Every result carries source/provenance information.
 
@@ -68,14 +72,39 @@ started. Secrets are never committed.
 | `LINKDOGGER_LOG_LEVEL` | `INFO` | Logging verbosity. |
 | `LINKDOGGER_WEB_HOST` | `127.0.0.1` | Bind address for the web dashboard. |
 | `LINKDOGGER_WEB_PORT` | `8000` | Port for the web dashboard. |
-| `LINKDOGGER_DISCOVERY_BACKEND` | `mock` | `mock` (sample data) or `github` (official API). |
+| `LINKDOGGER_DISCOVERY_BACKEND` | `mock` | Web backend: `mock` (sample data) or `github` (official API). |
 | `LINKDOGGER_GITHUB_TOKEN` | *(none)* | Optional GitHub token to raise API rate limits. |
+| `LINKDOGGER_LINKEDIN_SESSION_FILE` | *(none)* | Path to your LinkedIn session (created by `linkdogger linkedin-login`). |
+| `LINKDOGGER_LINKEDIN_HEADLESS` | `true` | Run the LinkedIn browser without a window. |
 | `LINKDOGGER_REQUEST_TIMEOUT_SECONDS` | `10.0` | Timeout for provider calls. |
 | `LINKDOGGER_MAX_RESULTS` | `100` | Default maximum results per search. |
 
-By default the app uses a mock backend (`mock-sample-data`) so it can be
-explored without network access. Set `LINKDOGGER_DISCOVERY_BACKEND=github` to
-use the GitHub API for real company and people discovery; the backend is safe
+### Providers
+
+The CLI selects a **provider** with `--provider` (default `linkedin`):
+
+| Provider | Discovery | Enrichment |
+| -------- | --------- | ---------- |
+| `linkedin` (default) | Company resolution from LinkedIn URLs | LinkedIn profile enrichment |
+| `github` | GitHub organizations + public members | GitHub profiles (email, accounts) |
+| `hybrid` | GitHub organizations + public members | GitHub **and** LinkedIn enrichment |
+| `mock` | Clearly marked sample data | *(none)* |
+
+> **LinkedIn reality check:** LinkedIn exposes no public employee directory,
+> so the `linkedin` provider can resolve a company but cannot yet find
+> people from LinkedIn alone — use `--provider hybrid` to discover people
+> through public GitHub data and enrich their profiles via LinkedIn. The
+> LinkedIn provider also needs the optional extra installed:
+>
+> ```bash
+> pip install -e ".[linkedin]"
+> playwright install chromium
+> linkdogger linkedin-login   # log in once in your browser; saves a session
+> ```
+
+By default the web dashboard uses the mock backend (`mock-sample-data`) so it
+can be explored without network access. Set `LINKDOGGER_DISCOVERY_BACKEND=github`
+to use the GitHub API for real company and people discovery; the backend is safe
 to run without a token and automatically degrades to public, unauthenticated
 calls.
 
@@ -91,7 +120,9 @@ linkdogger --version
 ### Search for a company
 
 ```bash
-linkdogger search "OpenAI"
+linkdogger search "OpenAI"                    # default: LinkedIn provider
+linkdogger search "OpenAI" --provider github  # GitHub API only
+linkdogger search "OpenAI" --hybrid           # GitHub discovery + LinkedIn enrichment
 ```
 
 Shows a live searching animation while discovery runs, then displays a table
@@ -184,6 +215,8 @@ pytest
 
 Continuous integration runs lint, format, type and test checks on every push
 and pull request (`.github/workflows/ci.yml`) across Python 3.12–3.14.
+(Note: the workflow is currently disabled — restore it from git history
+(`git show fa4e99d:.github/workflows/ci.yml`) when CI is wanted again.)
 
 ## Project Structure
 
@@ -212,7 +245,8 @@ linkdogger/
 │       ├── discovery/
 │       │   ├── base.py            # CompanyDiscoverer / PeopleDiscoverer
 │       │   ├── mock.py            # sample data backend
-│       │   └── github.py          # official GitHub API backend
+│       │   ├── github.py          # official GitHub API backend
+│       │   └── linkedin.py        # LinkedIn provider (company resolution)
 │       ├── enrichment/
 │       │   ├── base.py            # Enricher protocol
 │       │   ├── github.py

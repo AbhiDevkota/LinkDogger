@@ -15,4 +15,5 @@ def isolate_settings(monkeypatch: pytest.MonkeyPatch) -> None:
     """
     monkeypatch.setenv("LINKDOGGER_DISCOVERY_BACKEND", "mock")
     monkeypatch.delenv("LINKDOGGER_GITHUB_TOKEN", raising=False)
+    monkeypatch.delenv("LINKDOGGER_LINKEDIN_SESSION_FILE", raising=False)
     get_settings.cache_clear()

@@ -1,13 +1,21 @@
 """Service factory — wires the application core from configuration.
 
 Both interfaces (CLI and web) build their ``PeopleService`` here so the
-exact same business logic is shared. Backend selection:
+exact same business logic is shared. Provider selection:
 
-* ``mock`` (default): clearly marked fictional sample data, offline-safe.
-* ``github``: official GitHub API (public data only, rate limits respected).
+* ``linkedin`` (CLI default): LinkedIn company resolution + LinkedIn
+  profile enrichment. Honest limitation: LinkedIn exposes no employee
+  directory, so people discovery from LinkedIn alone yields no people
+  yet — use ``hybrid`` for discovery through public GitHub data.
+* ``github``: official GitHub API (public data only, rate limits
+  respected).
+* ``hybrid``: GitHub discovery + enrichment from both GitHub and
+  LinkedIn.
+* ``mock`` (web default): clearly marked fictional sample data,
+  offline-safe.
 
-The GitHub backend may be combined with a ``LINKDOGGER_GITHUB_TOKEN``
-(never committed) to raise rate limits; it is optional.
+The web interface keeps using ``LINKDOGGER_DISCOVERY_BACKEND``
+(mock/github) for its backend; the CLI selects a provider explicitly.
 """
 
 import logging
@@ -15,6 +23,10 @@ import logging
 from linkdogger.config.settings import Settings
 from linkdogger.discovery.base import CompanyDiscoverer, PeopleDiscoverer
 from linkdogger.discovery.github import GitHubCompanyDiscoverer, GitHubPeopleDiscoverer
+from linkdogger.discovery.linkedin import (
+    LinkedInCompanyDiscoverer,
+    LinkedInPeopleDiscoverer,
+)
 from linkdogger.discovery.mock import MockCompanyDiscoverer, MockPeopleDiscoverer
 from linkdogger.enrichment.base import Enricher
 from linkdogger.enrichment.github import GitHubEnricher
@@ -25,27 +37,56 @@ from linkdogger.services.people_service import PeopleService
 
 logger = logging.getLogger(__name__)
 
+VALID_PROVIDERS = ("linkedin", "github", "hybrid", "mock")
 
-def build_people_service(settings: Settings) -> PeopleService:
-    """Build a ``PeopleService`` from ``settings``."""
+
+def build_people_service(
+    settings: Settings, provider: str | None = None
+) -> PeopleService:
+    """Build a ``PeopleService`` from ``settings``.
+
+    ``provider`` defaults to ``settings.discovery_backend`` (used by the
+    web interface); the CLI passes an explicit provider.
+    """
+    provider = provider or settings.discovery_backend
+    if provider not in VALID_PROVIDERS:
+        raise ValueError(f"unknown provider '{provider}'")
+
     company_discoverer: CompanyDiscoverer
     people_discoverer: PeopleDiscoverer
     enrichers: list[Enricher]
-    if settings.discovery_backend == "github":
-        logger.info("Using GitHub discovery backend")
+
+    if provider == "mock":
+        logger.info("Using mock discovery backend (sample data)")
+        company_discoverer = MockCompanyDiscoverer()
+        people_discoverer = MockPeopleDiscoverer()
+        enrichers = []
+    elif provider == "github":
+        logger.info("Using GitHub provider")
         company_discoverer = GitHubCompanyDiscoverer(settings)
         people_discoverer = GitHubPeopleDiscoverer(settings)
         enrichers = [
             GitHubEnricher(settings),
             WebsiteEnricher(settings),
-            LinkedInEnricher(),
             XEnricher(),
         ]
-    else:
-        logger.info("Using mock discovery backend (sample data)")
-        company_discoverer = MockCompanyDiscoverer()
-        people_discoverer = MockPeopleDiscoverer()
-        enrichers = []
+    elif provider == "linkedin":
+        logger.info("Using LinkedIn provider")
+        company_discoverer = LinkedInCompanyDiscoverer(settings)
+        people_discoverer = LinkedInPeopleDiscoverer(settings)
+        enrichers = [LinkedInEnricher(settings), XEnricher()]
+    else:  # hybrid
+        logger.info(
+            "Using hybrid provider (GitHub discovery + GitHub & LinkedIn enrichment)"
+        )
+        company_discoverer = GitHubCompanyDiscoverer(settings)
+        people_discoverer = GitHubPeopleDiscoverer(settings)
+        enrichers = [
+            GitHubEnricher(settings),
+            LinkedInEnricher(settings),
+            WebsiteEnricher(settings),
+            XEnricher(),
+        ]
 
     return PeopleService(
         settings=settings,

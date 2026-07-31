@@ -14,16 +14,21 @@ runner = CliRunner()
 
 
 def test_search_sort_by_name() -> None:
-    result = runner.invoke(app, ["search", "Acme", "--sort", "name-asc"])
+    result = runner.invoke(
+        app, ["search", "Acme", "--sort", "name-asc", "--provider", "mock"]
+    )
     assert result.exit_code == 0
-    payload = json.loads(runner.invoke(app, ["search", "Acme", "--json"]).output)
+    payload = json.loads(
+        runner.invoke(app, ["search", "Acme", "--json", "--provider", "mock"]).output
+    )
     names = [p["name"] for p in payload["results"]]
     assert names == sorted(names)
 
 
 def test_search_sort_followers_desc_json() -> None:
     result = runner.invoke(
-        app, ["search", "Acme", "--json", "--sort", "followers-desc"]
+        app,
+        ["search", "Acme", "--json", "--sort", "followers-desc", "--provider", "mock"],
     )
     payload = json.loads(result.output)
 
@@ -40,14 +45,18 @@ def test_search_sort_followers_desc_json() -> None:
 
 
 def test_search_role_filter() -> None:
-    result = runner.invoke(app, ["search", "Acme", "--json", "--role", "engineer"])
+    result = runner.invoke(
+        app, ["search", "Acme", "--json", "--role", "engineer", "--provider", "mock"]
+    )
     payload = json.loads(result.output)
     assert payload["count"] == 1
     assert payload["results"][0]["position"] == "Software Engineer"
 
 
 def test_search_limit() -> None:
-    result = runner.invoke(app, ["search", "Acme", "--json", "--limit", "2"])
+    result = runner.invoke(
+        app, ["search", "Acme", "--json", "--limit", "2", "--provider", "mock"]
+    )
     payload = json.loads(result.output)
     assert payload["count"] == 2
 

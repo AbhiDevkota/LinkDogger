@@ -15,6 +15,8 @@ def clear_env(monkeypatch: pytest.MonkeyPatch) -> None:
         "MAX_RESULTS",
         "DISCOVERY_BACKEND",
         "GITHUB_TOKEN",
+        "LINKEDIN_SESSION_FILE",
+        "LINKEDIN_HEADLESS",
     ):  # noqa: E501
         monkeypatch.delenv(f"LINKDOGGER_{key}", raising=False)
 
@@ -28,6 +30,8 @@ def test_defaults() -> None:
     assert settings.max_results == 100
     assert settings.discovery_backend == "mock"
     assert settings.github_token is None
+    assert settings.linkedin_session_file is None
+    assert settings.linkedin_headless is True
 
 
 def test_environment_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -36,6 +40,8 @@ def test_environment_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("LINKDOGGER_MAX_RESULTS", "50")
     monkeypatch.setenv("LINKDOGGER_DISCOVERY_BACKEND", "github")
     monkeypatch.setenv("LINKDOGGER_GITHUB_TOKEN", "gh_test_token")
+    monkeypatch.setenv("LINKDOGGER_LINKEDIN_SESSION_FILE", "linkedin-session.json")
+    monkeypatch.setenv("LINKDOGGER_LINKEDIN_HEADLESS", "false")
 
     settings = Settings(_env_file=None)
     assert settings.log_level == "DEBUG"
@@ -43,6 +49,8 @@ def test_environment_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.max_results == 50
     assert settings.discovery_backend == "github"
     assert settings.github_token == "gh_test_token"
+    assert settings.linkedin_session_file == "linkedin-session.json"
+    assert settings.linkedin_headless is False
 
 
 def test_unknown_environment_variables_are_ignored(

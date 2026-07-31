@@ -71,13 +71,14 @@ class PeopleService:
         results and ``limit`` caps the returned list.
         """
         logger.info("Searching company: %s", company_query)
-        company = self._resolve_company(company_query)
+        warnings: list[str] = []
+        company = self._resolve_company(company_query, warnings)
         if company is None:
             logger.info("Company not found: %s", company_query)
-            return self._empty_result(company_query)
+            return self._empty_result(company_query, warnings)
 
         logger.info("Resolved company: %s", company.name)
-        people = self._discover_people(company)
+        people = self._discover_people(company, warnings)
         if limit is not None:
             people = people[:limit]
         logger.info("Found %d candidate profiles", len(people))
@@ -108,27 +109,35 @@ class PeopleService:
             company=company,
             results=people,
             source_status=source_status,
-            warnings=[],
+            warnings=warnings,
         )
 
-    def _resolve_company(self, company_query: str) -> Company | None:
+    def _resolve_company(
+        self, company_query: str, warnings: list[str]
+    ) -> Company | None:
         try:
             return self._company_discoverer.resolve_company(company_query)
         except RateLimitError as exc:
             logger.warning("Company resolution rate limited: %s", exc)
+            warnings.append(str(exc))
             return None
         except LinkDoggerError as exc:
             logger.warning("Company resolution failed: %s", exc)
+            warnings.append(str(exc))
             return None
 
-    def _discover_people(self, company: Company) -> list[PersonProfile]:
+    def _discover_people(
+        self, company: Company, warnings: list[str]
+    ) -> list[PersonProfile]:
         try:
             return list(self._people_discoverer.discover_people(company))
         except RateLimitError as exc:
             logger.warning("People discovery rate limited: %s", exc)
+            warnings.append(str(exc))
             return []
         except LinkDoggerError as exc:
             logger.warning("People discovery failed: %s", exc)
+            warnings.append(str(exc))
             return []
 
     def _enrich_people(
@@ -171,7 +180,9 @@ class PeopleService:
             person.networking = self._networking_scorer.score(person)
         return people
 
-    def _empty_result(self, company_query: str) -> SearchResult:
+    def _empty_result(
+        self, company_query: str, warnings: list[str] | None = None
+    ) -> SearchResult:
         return SearchResult(
             query=company_query,
             generated_at=datetime.now(UTC),
@@ -179,5 +190,5 @@ class PeopleService:
             company=None,
             results=[],
             source_status={},
-            warnings=[],
+            warnings=warnings or [],
         )
