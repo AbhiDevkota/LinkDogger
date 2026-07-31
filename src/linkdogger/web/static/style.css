@@ -1,0 +1,201 @@
+:root {
+  --bg: #0f1220;
+  --panel: #1a1f35;
+  --panel-alt: #222844;
+  --text: #e8eaf6;
+  --muted: #9aa3c0;
+  --accent: #5b8cff;
+  --accent-soft: rgba(91, 140, 255, 0.15);
+  --good: #4ade80;
+  --warn: #facc15;
+  --radius: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+
+.app-header {
+  text-align: center;
+  padding: 2.5rem 1rem 1rem;
+}
+
+.app-header h1 {
+  margin: 0;
+  font-size: 2rem;
+  letter-spacing: 0.04em;
+}
+
+.tagline {
+  color: var(--muted);
+  margin: 0.25rem 0 0;
+}
+
+.container {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.search-box {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.search-box input {
+  flex: 1;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--panel-alt);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.search-box button {
+  padding: 0.8rem 1.6rem;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.search-box button:hover {
+  filter: brightness(1.1);
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  margin: 1rem 0;
+}
+
+.controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.controls select,
+.controls input {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--panel-alt);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+}
+
+.status {
+  margin: 1rem 0;
+  padding: 0.8rem 1rem;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.status.error {
+  background: rgba(248, 113, 113, 0.15);
+}
+
+.results {
+  display: grid;
+  gap: 0.9rem;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--panel-alt);
+  border-radius: var(--radius);
+  padding: 1.1rem 1.2rem;
+}
+
+.card h3 {
+  margin: 0 0 0.15rem;
+  font-size: 1.1rem;
+}
+
+.card .role {
+  color: var(--muted);
+  margin: 0 0 0.6rem;
+}
+
+.card .meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.4rem;
+  margin-bottom: 0.6rem;
+  color: var(--text);
+}
+
+.card .meta span b {
+  color: var(--accent);
+}
+
+.card .links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.card .links a {
+  padding: 0.3rem 0.7rem;
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+
+.card .links a:hover {
+  filter: brightness(1.2);
+}
+
+.card .sources {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.empty {
+  text-align: center;
+  color: var(--muted);
+  padding: 2rem 0;
+}
+
+.score-pill {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 999px;
+  font-weight: 600;
+}
+
+.score-pill.high { background: rgba(74, 222, 128, 0.15); color: var(--good); }
+.score-pill.mid { background: rgba(250, 204, 21, 0.15); color: var(--warn); }
+.score-pill.low { background: rgba(248, 113, 113, 0.15); color: #f87171; }
+
+.app-footer {
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 2rem 1rem;
+}
+
+@media (max-width: 560px) {
+  .search-box { flex-direction: column; }
+  .controls { flex-direction: column; }
+}

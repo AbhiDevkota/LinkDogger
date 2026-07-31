@@ -7,6 +7,7 @@ environment or a local ``.env`` file (see ``.env.example``).
 """
 
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -26,6 +27,8 @@ class Settings(BaseSettings):
     web_port: int = 8000
     request_timeout_seconds: float = 10.0
     max_results: int = 100
+    discovery_backend: Literal["mock", "github"] = "mock"
+    github_token: str | None = None
 
 
 @lru_cache

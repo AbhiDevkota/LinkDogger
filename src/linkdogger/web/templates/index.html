@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LinkDogger</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="app-header">
+    <h1>LinkDogger</h1>
+    <p class="tagline">Public-profile people discovery and networking intelligence</p>
+  </header>
+
+  <main class="container">
+    <form id="search-form" class="search-box">
+      <input id="company-input" type="text" placeholder="Search company (e.g. OpenAI)" autocomplete="off" autofocus>
+      <button type="submit">Search</button>
+    </form>
+
+    <div class="controls">
+      <label for="sort-select">Sort by
+        <select id="sort-select">
+          <option value="networking-score-desc">Networking Score</option>
+          <option value="followers-desc">Followers</option>
+          <option value="followback-desc">Follow-back Likelihood</option>
+          <option value="influence-desc">Influence</option>
+          <option value="name-asc">Name</option>
+        </select>
+      </label>
+      <label for="role-input">Role filter
+        <input id="role-input" type="text" placeholder="e.g. engineer">
+      </label>
+      <label for="location-input">Location filter
+        <input id="location-input" type="text" placeholder="e.g. San Francisco">
+      </label>
+    </div>
+
+    <div id="status" class="status" hidden></div>
+    <section id="results" class="results" aria-live="polite"></section>
+  </main>
+
+  <footer class="app-footer">
+    <p>Only publicly available information is used. Networking scores are estimates, not facts.</p>
+  </footer>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
