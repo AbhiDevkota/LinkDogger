@@ -16,6 +16,11 @@ from linkdogger.config.settings import Settings
 from linkdogger.discovery.base import CompanyDiscoverer, PeopleDiscoverer
 from linkdogger.discovery.github import GitHubCompanyDiscoverer, GitHubPeopleDiscoverer
 from linkdogger.discovery.mock import MockCompanyDiscoverer, MockPeopleDiscoverer
+from linkdogger.enrichment.base import Enricher
+from linkdogger.enrichment.github import GitHubEnricher
+from linkdogger.enrichment.linkedin import LinkedInEnricher
+from linkdogger.enrichment.social import XEnricher
+from linkdogger.enrichment.website import WebsiteEnricher
 from linkdogger.services.people_service import PeopleService
 
 logger = logging.getLogger(__name__)
@@ -25,17 +30,26 @@ def build_people_service(settings: Settings) -> PeopleService:
     """Build a ``PeopleService`` from ``settings``."""
     company_discoverer: CompanyDiscoverer
     people_discoverer: PeopleDiscoverer
+    enrichers: list[Enricher]
     if settings.discovery_backend == "github":
         logger.info("Using GitHub discovery backend")
         company_discoverer = GitHubCompanyDiscoverer(settings)
         people_discoverer = GitHubPeopleDiscoverer(settings)
+        enrichers = [
+            GitHubEnricher(settings),
+            WebsiteEnricher(settings),
+            LinkedInEnricher(),
+            XEnricher(),
+        ]
     else:
         logger.info("Using mock discovery backend (sample data)")
         company_discoverer = MockCompanyDiscoverer()
         people_discoverer = MockPeopleDiscoverer()
+        enrichers = []
 
     return PeopleService(
         settings=settings,
         company_discoverer=company_discoverer,
         people_discoverer=people_discoverer,
+        enrichers=enrichers,
     )

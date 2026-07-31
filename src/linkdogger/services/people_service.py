@@ -6,30 +6,45 @@ a database can be added behind this service without changing callers.
 """
 
 import logging
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from linkdogger.config.settings import Settings
 from linkdogger.discovery.base import CompanyDiscoverer, PeopleDiscoverer
-from linkdogger.errors import LinkDoggerError, RateLimitError
+from linkdogger.enrichment.base import Enricher
+from linkdogger.errors import (
+    EnrichmentIncompleteError,
+    LinkDoggerError,
+    RateLimitError,
+    SourceUnavailableError,
+)
 from linkdogger.models.company import Company
 from linkdogger.models.person import PersonProfile
 from linkdogger.models.search import SearchResult
 
 logger = logging.getLogger(__name__)
 
+KNOWN_PLATFORMS = ("linkedin", "github", "x", "website")
+
 
 class PeopleService:
-    """Orchestrates discovery into a structured search result."""
+    """Orchestrates the search pipeline:
+
+    resolve company -> discover people -> enrich profiles ->
+    source status -> structured result.
+    """
 
     def __init__(
         self,
         settings: Settings,
         company_discoverer: CompanyDiscoverer,
         people_discoverer: PeopleDiscoverer,
+        enrichers: Sequence[Enricher] = (),
     ) -> None:
         self._settings = settings
         self._company_discoverer = company_discoverer
         self._people_discoverer = people_discoverer
+        self._enrichers = list(enrichers)
 
     def search_company(self, company_query: str) -> SearchResult:
         """Discover publicly discoverable people for ``company_query``."""
@@ -43,13 +58,16 @@ class PeopleService:
         people = self._discover_people(company)
         logger.info("Found %d candidate profiles", len(people))
 
+        people, source_status = self._enrich_people(people)
+        logger.info("Enrichment complete for %d people", len(people))
+
         return SearchResult(
             query=company_query,
             generated_at=datetime.now(UTC),
             count=len(people),
             company=company,
             results=people,
-            source_status={},
+            source_status=source_status,
             warnings=[],
         )
 
@@ -72,6 +90,38 @@ class PeopleService:
         except LinkDoggerError as exc:
             logger.warning("People discovery failed: %s", exc)
             return []
+
+    def _enrich_people(
+        self,
+        people: list[PersonProfile],
+    ) -> tuple[list[PersonProfile], dict[str, str]]:
+        """Run all enrichers; one failing source never destroys the search."""
+        statuses = self._initial_statuses(people)
+        for enricher in self._enrichers:
+            try:
+                people = enricher.enrich_all(people)
+                statuses[enricher.name] = "ok"
+            except EnrichmentIncompleteError as exc:
+                statuses[enricher.name] = "partial"
+                logger.warning("Source %s: %s", enricher.name, exc)
+            except SourceUnavailableError as exc:
+                statuses[enricher.name] = "unavailable"
+                logger.info("Source %s unavailable: %s", enricher.name, exc)
+            except LinkDoggerError as exc:
+                statuses[enricher.name] = "error"
+                logger.warning("Source %s failed: %s", enricher.name, exc)
+            except Exception:
+                statuses[enricher.name] = "error"
+                logger.exception("Unexpected error in source %s", enricher.name)
+        return people, statuses
+
+    @staticmethod
+    def _initial_statuses(people: Sequence[PersonProfile]) -> dict[str, str]:
+        statuses: dict[str, str] = {}
+        for platform in KNOWN_PLATFORMS:
+            found = any(platform in person.profiles for person in people)
+            statuses[platform] = "ok" if found else "no-data"
+        return statuses
 
     def _empty_result(self, company_query: str) -> SearchResult:
         return SearchResult(

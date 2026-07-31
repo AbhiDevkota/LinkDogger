@@ -29,3 +29,11 @@ class ProviderError(LinkDoggerError):
 
 class NetworkTimeoutError(LinkDoggerError):
     """A provider request timed out."""
+
+
+class EnrichmentIncompleteError(LinkDoggerError):
+    """An enricher completed but could not enrich every candidate."""
+
+    def __init__(self, message: str, skipped: int) -> None:
+        super().__init__(message)
+        self.skipped = skipped
