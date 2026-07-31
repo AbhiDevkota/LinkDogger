@@ -97,7 +97,8 @@ def test_hybrid_flag_is_shorthand_for_hybrid_provider() -> None:
     assert "warnings" in payload
 
 
-def test_linkedin_provider_reports_discovery_gap() -> None:
+def test_linkedin_provider_reports_discovery_gap(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
     result = runner.invoke(app, ["search", "Microsoft", "--json"])
     assert result.exit_code == 0
     payload = json.loads(result.output)
@@ -105,7 +106,8 @@ def test_linkedin_provider_reports_discovery_gap() -> None:
     assert any("LinkedIn" in w for w in payload["warnings"])
 
 
-def test_linkedin_login_without_cookie_file_errors() -> None:
+def test_linkedin_login_without_cookie_file_errors(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
     result = runner.invoke(app, ["linkedin-login"])
     assert result.exit_code != 0
     assert "LINKDOGGER_LINKEDIN_COOKIE_FILE" in result.output

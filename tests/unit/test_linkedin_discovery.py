@@ -20,12 +20,14 @@ class FakeClient:
     company: dict | None = None
     people: list[dict] = []
     errors: list[Exception] = []
-    company_search_calls: list[list[str]] = []
+    company_search_calls: list[dict] = []
     company_lookups: list[str] = []
     people_search_calls: list[dict] = []
 
     def search_companies(self, keywords=None, **kwargs):
-        FakeClient.company_search_calls.append(keywords or [])
+        FakeClient.company_search_calls.append(
+            {"keywords": keywords or [], "kwargs": kwargs}
+        )
         if FakeClient.errors:
             raise FakeClient.errors.pop(0)
         return FakeClient.companies
@@ -42,6 +44,8 @@ class FakeClient:
                 "limit": limit,
             }
         )
+        if FakeClient.errors:
+            raise FakeClient.errors.pop(0)
         return FakeClient.people
 
 
@@ -149,7 +153,9 @@ def test_company_resolved_via_search_companies(
     assert company.description == "AGI lab"
     assert company.source == "linkedin-api"
     assert company.aliases == ["1234", "openai"]
-    assert FakeClient.company_search_calls == [["OpenAI"]]
+    assert FakeClient.company_search_calls == [
+        {"keywords": ["OpenAI"], "kwargs": {"limit": 5}}
+    ]
 
 
 def test_company_falls_back_to_slug_on_api_error(
@@ -187,6 +193,16 @@ def test_company_without_credentials_skips_api(
     assert company is not None
     assert company.source == "linkedin-slug"
     assert FakeClient.company_search_calls == []
+
+
+def test_people_search_failure_raises_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    FakeClient.errors = [RuntimeError("request failed")]
+    discoverer = LinkedInPeopleDiscoverer(_settings(**_creds()))
+    with pytest.raises(SourceUnavailableError, match="people search failed"):
+        discoverer.discover_people(_company())
 
 
 def test_people_discovery_uses_company_urn(

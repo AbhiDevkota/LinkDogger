@@ -73,6 +73,7 @@ def get_linkedin_client(
     password: str | None,
     cookies_dir: str | None = None,
     cookie_file: str | None = None,
+    timeout: float | None = None,
 ) -> Any:
     """Return an authenticated ``open_linkedin_api.Linkedin`` client.
 
@@ -81,6 +82,10 @@ def get_linkedin_client(
     is the fallback. Raises ``SourceUnavailableError`` with an honest
     reason when the library is missing, no auth is configured, or login
     fails.
+
+    ``timeout`` is injected as a default for the library's HTTP calls —
+    the library itself does not set one, so without it a dead connection
+    would hang forever.
     """
     try:
         from open_linkedin_api import Linkedin
@@ -95,19 +100,19 @@ def get_linkedin_client(
     if cookie_file:
         cookies = _cookies_from_file(cookie_file)
         logger.info("Using LinkedIn session cookies from %s", cookie_file)
-        return Linkedin("", "", cookies=cookies)
+        return _with_session_timeout(Linkedin("", "", cookies=cookies), timeout)
 
     if not email or not password:
         raise SourceUnavailableError(NO_CREDENTIALS_MESSAGE)
 
     kwargs: dict[str, Any] = {"cookies_dir": cookies_dir or ""}
     try:
-        return Linkedin(email, password, **kwargs)
+        client = Linkedin(email, password, **kwargs)
     except LinkedinSessionExpired:
         # Cached cookies expired; the library re-saves them after a fresh
         # login, so force one and keep the cache for next time.
         logger.warning("LinkedIn session cookies expired; logging in again")
-        return Linkedin(email, password, refresh_cookies=True, **kwargs)
+        client = Linkedin(email, password, refresh_cookies=True, **kwargs)
     except ChallengeException as exc:
         raise SourceUnavailableError(
             f"LinkedIn login challenged ({exc}); check your credentials "
@@ -122,6 +127,27 @@ def get_linkedin_client(
         raise
     except Exception as exc:  # noqa: BLE001 - login failures are varied
         raise SourceUnavailableError(f"LinkedIn login failed: {exc}") from exc
+    return _with_session_timeout(client, timeout)
+
+
+def _with_session_timeout(client: Any, timeout: float | None) -> Any:
+    """Give the library's HTTP session a default request timeout.
+
+    ``open-linkedin-api`` never passes ``timeout`` to ``requests``, so a
+    stalled connection would block forever. Wrapping ``session.request``
+    injects our default while leaving explicit timeouts untouched.
+    """
+    session = getattr(getattr(client, "client", None), "session", None)
+    if session is None or timeout is None:
+        return client
+    original_request = session.request
+
+    def request(method: str, url: str, **kwargs: Any) -> Any:
+        kwargs.setdefault("timeout", timeout)
+        return original_request(method, url, **kwargs)
+
+    session.request = request
+    return client
 
 
 def _cookies_from_file(path: str) -> Any:

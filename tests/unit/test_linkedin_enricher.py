@@ -77,6 +77,19 @@ class FakeLinkedin(FakeClient):
         )
         if FakeLinkedin.errors:
             raise FakeLinkedin.errors.pop(0)
+        self.client = FakeLibraryClient()
+
+
+class FakeLibrarySession:
+    calls: list[tuple[str, str, dict]] = []
+
+    def request(self, method: str, url: str, **kwargs) -> None:
+        FakeLibrarySession.calls.append((method, url, kwargs))
+
+
+class FakeLibraryClient:
+    def __init__(self) -> None:
+        self.session = FakeLibrarySession()
 
 
 def _install_fake_linkedin_api(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -100,6 +113,7 @@ def _install_fake_linkedin_api(monkeypatch: pytest.MonkeyPatch) -> None:
     FakeClient.calls = []
     FakeLinkedin.instances = []
     FakeLinkedin.errors = []
+    FakeLibrarySession.calls = []
 
 
 def _person_with_linkedin() -> PersonProfile:
@@ -425,6 +439,30 @@ def test_cookie_file_from_settings(tmp_path, monkeypatch: pytest.MonkeyPatch) ->
     )
     result = LinkedInEnricher(settings).enrich_all([_person_with_linkedin()])
     assert result[0].position == "Engineer at Acme"
+
+
+def test_session_gets_default_request_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The library never sets a timeout, so one is injected per client."""
+    _install_fake_linkedin_api(monkeypatch)
+    from linkdogger.linkedin_api import get_linkedin_client
+
+    client = get_linkedin_client("me@acme.com", "pw", timeout=42.0)
+    session = client.client.session
+    session.request("GET", "https://example.com")
+    assert FakeLibrarySession.calls[-1][2].get("timeout") == 42.0
+    session.request("GET", "https://example.com", timeout=7.0)
+    assert FakeLibrarySession.calls[-1][2]["timeout"] == 7.0
+
+
+def test_no_timeout_wrapper_without_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_fake_linkedin_api(monkeypatch)
+    from linkdogger.linkedin_api import get_linkedin_client
+
+    client = get_linkedin_client("me@acme.com", "pw")
+    client.client.session.request("GET", "https://example.com")
+    assert "timeout" not in FakeLibrarySession.calls[-1][2]
 
 
 def test_enrichment_pipeline_marks_linkedin_status(

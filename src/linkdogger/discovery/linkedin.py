@@ -60,6 +60,7 @@ class LinkedInCompanyDiscoverer(CompanyDiscoverer):
         self._password = settings.linkedin_password
         self._cookies_dir = settings.linkedin_cookies_dir
         self._cookie_file = settings.linkedin_cookie_file
+        self._timeout = settings.request_timeout_seconds
 
     def resolve_company(self, query: str) -> Company | None:
         if not query.strip():
@@ -85,7 +86,11 @@ class LinkedInCompanyDiscoverer(CompanyDiscoverer):
     def _client_or_none(self) -> Any | None:
         try:
             return get_linkedin_client(
-                self._email, self._password, self._cookies_dir, self._cookie_file
+                self._email,
+                self._password,
+                self._cookies_dir,
+                self._cookie_file,
+                timeout=self._timeout,
             )
         except SourceUnavailableError as exc:
             logger.info("LinkedIn API unavailable; using slug fallback: %s", exc)
@@ -93,7 +98,11 @@ class LinkedInCompanyDiscoverer(CompanyDiscoverer):
 
     def _resolve_with_api(self, client: Any, query: str, slug: str) -> Company | None:
         try:
-            results = client.search_companies(keywords=[query])
+            # Bound the search: we only need the first hit. The library
+            # pages until an empty result when no limit is given, which
+            # with common queries means dozens of requests (each with a
+            # 2-5 s sleep) for results we would throw away.
+            results = client.search_companies(keywords=[query], limit=5)
             if results:
                 first = results[0]
                 aliases: list[str] = [slug]
@@ -133,12 +142,24 @@ class LinkedInPeopleDiscoverer(PeopleDiscoverer):
         self._cookies_dir = settings.linkedin_cookies_dir
         self._cookie_file = settings.linkedin_cookie_file
         self._limit = settings.max_results
+        self._timeout = settings.request_timeout_seconds
 
     def discover_people(self, company: Company) -> list[PersonProfile]:
         client = get_linkedin_client(
-            self._email, self._password, self._cookies_dir, self._cookie_file
+            self._email,
+            self._password,
+            self._cookies_dir,
+            self._cookie_file,
+            timeout=self._timeout,
         )
-        results = self._search(client, company)
+        try:
+            results = self._search(client, company)
+        except SourceUnavailableError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - search failures are varied
+            raise SourceUnavailableError(
+                f"LinkedIn people search failed: {exc}"
+            ) from exc
         people = []
         for item in results:
             name = item.get("name")
