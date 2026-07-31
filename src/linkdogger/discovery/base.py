@@ -25,5 +25,5 @@ class PeopleDiscoverer(Protocol):
     concrete implementation.
     """
 
-    def discover_people(self, company: str) -> Sequence[PersonProfile]:
+    def discover_people(self, company: Company) -> Sequence[PersonProfile]:
         """Return publicly discoverable people for ``company``."""

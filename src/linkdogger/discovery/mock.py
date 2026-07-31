@@ -53,16 +53,15 @@ class MockCompanyDiscoverer(CompanyDiscoverer):
 
 
 class MockPeopleDiscoverer(PeopleDiscoverer):
-    """Returns static sample people for a company name.
+    """Returns static sample people for a resolved company.
 
-    Only known companies produce results; unknown companies return an
-    empty list instead of fabricated data.
+    Sample data is clearly fictional and marked with ``MOCK_SOURCE``.
     """
 
-    def discover_people(self, company: str) -> list[PersonProfile]:
-        if not company.strip():
+    def discover_people(self, company: Company) -> list[PersonProfile]:
+        if not company.name.strip():
             return []
-        return self._sample_people(company.strip())
+        return self._sample_people(company.name)
 
     @staticmethod
     def _sample_people(company: str) -> list[PersonProfile]:

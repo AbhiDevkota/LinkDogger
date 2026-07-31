@@ -14,7 +14,7 @@ import logging
 
 from linkdogger.config.settings import Settings
 from linkdogger.discovery.base import CompanyDiscoverer, PeopleDiscoverer
-from linkdogger.discovery.github import GitHubCompanyDiscoverer
+from linkdogger.discovery.github import GitHubCompanyDiscoverer, GitHubPeopleDiscoverer
 from linkdogger.discovery.mock import MockCompanyDiscoverer, MockPeopleDiscoverer
 from linkdogger.services.people_service import PeopleService
 
@@ -28,7 +28,7 @@ def build_people_service(settings: Settings) -> PeopleService:
     if settings.discovery_backend == "github":
         logger.info("Using GitHub discovery backend")
         company_discoverer = GitHubCompanyDiscoverer(settings)
-        people_discoverer = MockPeopleDiscoverer()
+        people_discoverer = GitHubPeopleDiscoverer(settings)
     else:
         logger.info("Using mock discovery backend (sample data)")
         company_discoverer = MockCompanyDiscoverer()

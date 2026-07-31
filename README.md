@@ -30,7 +30,8 @@ conventional commit and pull request.
 | ----- | ----------- | ------ |
 | 0 | Project bootstrap | Done |
 | 1 | CLI (`search`, `--json`, `--version`) | Done |
-| 2 | Company discovery | In progress |
+| 2 | Company discovery | Done |
+| 3 | People discovery | In progress |
 | 2 | Company discovery | Planned |
 | 3 | People discovery | Planned |
 | 4 | Social profile enrichment | Planned |

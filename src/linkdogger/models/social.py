@@ -14,3 +14,4 @@ class SocialProfile(BaseModel):
     verified: bool | None = None
     source: str
     confidence: float | None = None
+    identity_confidence: float | None = None

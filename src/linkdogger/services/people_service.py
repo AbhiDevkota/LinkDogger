@@ -65,7 +65,7 @@ class PeopleService:
 
     def _discover_people(self, company: Company) -> list[PersonProfile]:
         try:
-            return list(self._people_discoverer.discover_people(company.name))
+            return list(self._people_discoverer.discover_people(company))
         except RateLimitError as exc:
             logger.warning("People discovery rate limited: %s", exc)
             return []

@@ -14,7 +14,7 @@ import time
 import httpx
 
 from linkdogger.config.settings import Settings
-from linkdogger.discovery.base import CompanyDiscoverer
+from linkdogger.discovery.base import CompanyDiscoverer, PeopleDiscoverer
 from linkdogger.errors import (
     LinkDoggerError,
     NetworkTimeoutError,
@@ -22,6 +22,8 @@ from linkdogger.errors import (
     RateLimitError,
 )
 from linkdogger.models.company import Company
+from linkdogger.models.person import PersonProfile
+from linkdogger.models.social import SocialProfile
 
 logger = logging.getLogger(__name__)
 
@@ -157,3 +159,53 @@ def _domain_from_url(url: str | None) -> str | None:
     domain = url.strip().lower().removeprefix("https://").removeprefix("http://")
     domain = domain.split("/")[0].split("?")[0]
     return domain or None
+
+
+class GitHubPeopleDiscoverer(PeopleDiscoverer):
+    """Discovers people whose public GitHub profile names ``company``.
+
+    Uses the official Search Users API with the ``company:`` qualifier.
+    Only the public company field is matched; private or hidden data is
+    never accessed. Results are candidates: their identity is validated
+    and enriched in later pipeline stages.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        transport: httpx.BaseTransport | None = None,
+    ) -> None:
+        self._client = GitHubClient(settings, transport=transport)
+
+    def discover_people(self, company: Company) -> list[PersonProfile]:
+        from urllib.parse import quote
+
+        query = quote(f'company:"{company.name}"')
+        search_path = f"/search/users?q={query}&per_page=30"
+        payload = self._client.get_json(search_path)
+        if not isinstance(payload, dict) or not isinstance(payload.get("items"), list):
+            raise ProviderError("Malformed GitHub user search response")
+
+        people: list[PersonProfile] = []
+        for item in payload["items"]:
+            login = item.get("login")
+            if not login or item.get("type") == "Organization":
+                continue
+            people.append(
+                PersonProfile(
+                    name=login,
+                    company=company.name,
+                    position=None,
+                    profiles={
+                        "github": SocialProfile(
+                            platform="github",
+                            url=f"https://github.com/{login}",
+                            username=login,
+                            source="github-api",
+                            identity_confidence=None,
+                        )
+                    },
+                    sources=["github-api"],
+                )
+            )
+        return people
