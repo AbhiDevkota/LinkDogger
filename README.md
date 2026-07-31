@@ -28,8 +28,8 @@ conventional commit and pull request.
 
 | Stage | Description | Status |
 | ----- | ----------- | ------ |
-| 0 | Project bootstrap | In progress |
-| 1 | CLI (`search`, `--json`, `--version`) | Planned |
+| 0 | Project bootstrap | Done |
+| 1 | CLI (`search`, `--json`, `--version`) | In progress |
 | 2 | Company discovery | Planned |
 | 3 | People discovery | Planned |
 | 4 | Social profile enrichment | Planned |
@@ -69,6 +69,55 @@ LINKDOGGER_WEB_HOST=127.0.0.1
 LINKDOGGER_WEB_PORT=8000
 ```
 
+## Usage
+
+### Help and version
+
+```bash
+linkdogger --help
+linkdogger --version
+```
+
+### Search for a company
+
+```bash
+linkdogger search "OpenAI"
+```
+
+Displays a table of publicly discoverable people associated with the
+company:
+
+```text
+LinkDogger v0.1.0
+Company: OpenAI
+
+Found 3 publicly discoverable people
+
+                    Publicly discoverable people @ OpenAI
+┏━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━┓
+┃ Name         ┃ Position            ┃ Location        ┃ Platforms ┃
+┡━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━┩
+│ Alex Sample  │ Software Engineer   │ San Francisco…  │ github, … │
+│ …            │ …                   │ …               │ …         │
+└──────────────┴─────────────────────┴─────────────────┴───────────┘
+
+Use --json for machine-readable output.
+```
+
+### Machine-readable output
+
+```bash
+linkdogger search "OpenAI" --json
+```
+
+Emits a versioned JSON document (`schema_version`) with `query`,
+`generated_at`, `count`, and `results`.
+
+> **Note:** the current build returns clearly marked sample data (source
+> `mock-sample-data`) while real company/people discovery is being
+> implemented in later stages. Results are `null` when information is
+> unavailable — never guessed.
+
 ## Development
 
 ```bash
@@ -92,8 +141,21 @@ linkdogger/
 │       ├── __init__.py
 │       ├── __main__.py
 │       ├── cli.py
-│       └── config/
-│           └── settings.py
+│       ├── config/
+│       │   └── settings.py
+│       ├── models/
+│       │   ├── person.py
+│       │   ├── social.py
+│       │   ├── networking.py
+│       │   └── search.py
+│       ├── discovery/
+│       │   ├── base.py
+│       │   └── mock.py
+│       ├── services/
+│       │   └── people_service.py
+│       └── output/
+│           ├── json.py
+│           └── table.py
 └── tests/
     ├── unit/
     ├── integration/
