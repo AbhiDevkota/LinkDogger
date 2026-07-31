@@ -1,12 +1,14 @@
 """LinkDogger command-line interface."""
 
 import logging
+from pathlib import Path
 
 import typer
 from rich.console import Console
 
 from linkdogger import __version__
 from linkdogger.config.settings import get_settings
+from linkdogger.output.export import export_result
 from linkdogger.output.json import render_json
 from linkdogger.output.table import render_table
 from linkdogger.services.factory import build_people_service
@@ -82,6 +84,9 @@ def search(
     limit: int | None = typer.Option(
         None, "--limit", help="Maximum number of results to show."
     ),
+    export: Path | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        None, "--export", help="Write results to a file (.json, .csv or .md)."
+    ),
 ) -> None:
     """Discover publicly discoverable people associated with COMPANY."""
     logger.info("Searching company: %s", company)
@@ -101,6 +106,13 @@ def search(
     result = _build_people_service().search_company(
         company, sort=sort_key, filters=filters, limit=limit
     )
+
+    if export is not None:
+        try:
+            message = export_result(result, export)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        console.print(f"[green]{message}[/green]")
 
     if json_output:
         console.print(render_json(result), markup=False)
