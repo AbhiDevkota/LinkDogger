@@ -94,6 +94,8 @@ class PeopleService:
             logger.info("Filters applied: %d people remain", len(people))
         if sort is not None:
             people = apply_sort(people, *sort)
+        else:
+            people = apply_sort(people, SortKey.FOLLOWBACK, "desc")
         if limit is not None:
             people = people[:limit]
 

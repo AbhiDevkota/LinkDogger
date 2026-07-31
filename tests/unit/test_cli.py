@@ -41,6 +41,13 @@ def test_search_unknown_company_reports_not_found() -> None:
     assert "Company not found" in result.output
 
 
+def test_search_with_log_shows_results() -> None:
+    result = runner.invoke(app, ["search", "Acme", "--log"])
+    assert result.exit_code == 0
+    assert "Acme Corporation" in result.output
+    assert "Alex Sample" in result.output
+
+
 def test_search_json_output() -> None:
     result = runner.invoke(app, ["search", "Acme", "--json"])
     assert result.exit_code == 0

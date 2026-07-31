@@ -94,8 +94,9 @@ linkdogger --version
 linkdogger search "OpenAI"
 ```
 
-Displays a table of publicly discoverable people associated with the
-company:
+Shows a live searching animation while discovery runs, then displays a table
+of publicly discoverable people associated with the company, ranked by
+**follow-back likelihood (descending)** by default:
 
 ```text
 LinkDogger v0.1.0
@@ -113,6 +114,15 @@ Found 3 publicly discoverable people
 
 Use --json for machine-readable output.
 ```
+
+### Inspecting what is happening
+
+```bash
+linkdogger search "OpenAI" --log
+```
+
+Replaces the animation with detailed progress logs (backend in use, API
+requests, enrichment status) printed to stderr.
 
 ### Machine-readable output
 
@@ -135,6 +145,8 @@ linkdogger search "OpenAI" --role engineer --location "San Francisco"
 
 `--sort` accepts `followers`, `networking-score`, `followback`, `influence`
 or `name`, each optionally suffixed with `-asc`/`-desc` (default `desc`).
+Without `--sort`, results are ranked by follow-back likelihood, descending —
+the best profiles to engage with appear first.
 
 ### Exporting results
 
