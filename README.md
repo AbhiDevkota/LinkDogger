@@ -298,6 +298,9 @@ linkdogger send openai.emails.json --dry-run --subject "Hi {name} from OpenAI" -
 
 # 3. Send for real (configure LINKDOGGER_SMTP_HOST in .env)
 linkdogger send openai.emails.json --subject "..." --body-file template.txt
+
+# Single recipient? Pass the address directly instead of a file
+linkdogger send someone@gmail.com --dry-run
 ```
 
 Templates support the placeholders `{name}`, `{company}`, `{position}` and

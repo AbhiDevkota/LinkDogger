@@ -506,3 +506,85 @@ def test_send_view_template_aborts_without_sending(tmp_path, monkeypatch) -> Non
     assert "Will send to:" in result.output
     assert "alice@example.com, bob@example.com" in result.output
     assert "Aborted" in result.output
+
+
+def test_send_single_email_dry_run_previews(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    result = runner.invoke(
+        app, ["send", "rubync2020@gmail.com", "--dry-run", "--delay", "0"]
+    )
+    assert result.exit_code == 0
+    assert "previewed 1 of 1 emails" in result.output
+
+
+def test_send_single_email_without_smtp_errors(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    result = runner.invoke(app, ["send", "rubync2020@gmail.com"])
+    assert result.exit_code != 0
+    assert "SMTP is not configured" in result.output
+
+
+def test_send_single_email_delivers(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    monkeypatch.setenv("LINKDOGGER_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("LINKDOGGER_SMTP_FROM", "outbox@example.com")
+    monkeypatch.setenv("LINKDOGGER_SMTP_FROM_NAME", "Sweet Butter")
+
+    class FakeSMTP:
+        messages: list = []
+
+        def __init__(self, host, port=587, timeout=15) -> None:
+            pass
+
+        def ehlo(self) -> None:
+            pass
+
+        def starttls(self) -> None:
+            pass
+
+        def login(self, user, password) -> None:
+            pass
+
+        def send_message(self, message) -> None:
+            FakeSMTP.messages.append(message)
+
+        def quit(self) -> None:
+            pass
+
+    monkeypatch.setattr("linkdogger.mail.sender.smtplib.SMTP", FakeSMTP)
+    result = runner.invoke(app, ["send", "rubync2020@gmail.com", "--delay", "0"])
+    assert result.exit_code == 0
+    assert "sent 1 of 1 emails" in result.output
+    message = FakeSMTP.messages[0]
+    assert message["To"] == "rubync2020@gmail.com"
+    assert "rubync2020@gmail.com" in message["Subject"]
+
+
+def test_send_single_email_generate_dry_run(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    monkeypatch.setenv("LINKDOGGER_AI_API_KEY", "nvapi-test")
+
+    class FakeGen:
+        def generate(self, contact):
+            return EmailDraft(f"Hi {contact.email}", "Single body.")
+
+    monkeypatch.setattr("linkdogger.cli.DraftGenerator", lambda settings: FakeGen())
+    result = runner.invoke(
+        app,
+        ["send", "rubync2020@gmail.com", "--generate", "--dry-run", "--delay", "0"],
+    )
+    assert result.exit_code == 0
+    assert "Hi rubync2020@gmail.com" in result.output
+    assert "Generated 1 draft(s)" in result.output
+
+
+def test_send_single_email_view_aborts(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    result = runner.invoke(
+        app,
+        ["send", "rubync2020@gmail.com", "--view", "--delay", "0"],
+        input="n\n",
+    )
+    assert result.exit_code == 0
+    assert "Will send to: rubync2020@gmail.com" in result.output
+    assert "Aborted" in result.output

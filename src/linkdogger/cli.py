@@ -20,7 +20,7 @@ from linkdogger.mail.observer import ReplyObserver, build_reply_report
 from linkdogger.mail.sender import (
     DEFAULT_BODY,
     DEFAULT_SUBJECT,
-    send_emails_from_file,
+    send_emails,
     send_generated,
     send_test_email,
 )
@@ -352,10 +352,10 @@ def mcp() -> None:
 
 @app.command()
 def send(
-    file: Path | None = typer.Argument(  # noqa: B008 - typer.Argument default, consistent with sibling options
+    file: str | None = typer.Argument(  # noqa: B008 - typer.Argument default, consistent with sibling options
         None,
-        help="Exported contacts file (e.g. from --export email); "
-        "not needed with --test.",
+        help="Exported contacts file (e.g. from --export email) or a single "
+        "email address (e.g. you@gmail.com); not needed with --test.",
     ),
     subject: str | None = typer.Option(
         None,
@@ -405,14 +405,15 @@ def send(
 ) -> None:
     """Send personalized emails to every address in an exported contacts file.
 
-    With --test EMAIL "TITLE" "BODY", send a single test email instead,
-    to verify your SMTP setup before any real outreach. With --generate,
-    every subject and body is drafted by AI (DeepSeek V4 Flash via
-    NVIDIA NIM) instead of the --subject/--body template. With --view,
-    every message is shown for review and you are asked to confirm
-    before anything is sent. Configure the outbox with LINKDOGGER_SMTP_HOST
-    (plus username, password and from-address) in your .env. Always try
-    --dry-run first.
+    Pass a single email address instead of a contacts file to send to
+    just that address. With --test EMAIL "TITLE" "BODY", send a single
+    test email instead, to verify your SMTP setup before any real
+    outreach. With --generate, every subject and body is drafted by AI
+    (DeepSeek V4 Flash via NVIDIA NIM) instead of the --subject/--body
+    template. With --view, every message is shown for review and you are
+    asked to confirm before anything is sent. Configure the outbox with
+    LINKDOGGER_SMTP_HOST (plus username, password and from-address) in
+    your .env. Always try --dry-run first.
     """
     settings = get_settings()
 
@@ -454,8 +455,17 @@ def send(
 
     if file is None:
         raise typer.BadParameter(
-            "missing contacts file argument (or use --test EMAIL TITLE BODY)"
+            "missing contacts file or email address (or use --test EMAIL TITLE BODY)"
         )
+
+    single_email = validate_email(file)
+    if single_email is not None:
+        contacts = [Contact(email=single_email)]
+    else:
+        try:
+            contacts = load_contacts(Path(file))
+        except MailError as exc:
+            raise typer.BadParameter(str(exc)) from None
 
     if generate:
         if not settings.ai_api_key:
@@ -463,10 +473,6 @@ def send(
                 "AI is not configured: set LINKDOGGER_AI_API_KEY in your .env "
                 "(get a free key from build.nvidia.com)"
             )
-        try:
-            contacts = load_contacts(file)
-        except MailError as exc:
-            raise typer.BadParameter(str(exc)) from None
         generator = DraftGenerator(settings)
         drafts: list[EmailDraft] = []
         try:
@@ -524,10 +530,6 @@ def send(
         console.print("[bold cyan]Review[/bold cyan] — nothing has been sent yet.")
         console.print(f"  Subject: {subject}")
         console.print(f"  Body:\n{body}")
-        try:
-            contacts = load_contacts(file)
-        except MailError as exc:
-            raise typer.BadParameter(str(exc)) from None
         console.print(
             "[green]Will send to:[/green] "
             + ", ".join(contact.email for contact in contacts)
@@ -545,8 +547,8 @@ def send(
         )
 
     try:
-        report = send_emails_from_file(
-            str(file),
+        report = send_emails(
+            contacts,
             subject=subject,
             body=body,
             settings=settings,
