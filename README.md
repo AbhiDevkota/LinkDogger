@@ -131,11 +131,11 @@ calls.
 
 ## ToDo's
 
-- [ ] Add system to export all the found mail to JSON file.
+- [x] Add system to export all the found mail to JSON file.
 - [ ] Add llm support to app
-- [ ] Enable IPC and MCP support of the app
-- [ ] Using SMTP, creating system to send email using exported json file.
-- [ ] Observer to overlook the response of the email and inform the user.
+- [x] Enable IPC and MCP support of the app
+- [x] Using SMTP, creating system to send email using exported json file.
+- [x] Observer to overlook the response of the email and inform the user.
 
 
 ## Usage
@@ -260,6 +260,65 @@ Serves a local dashboard at `http://127.0.0.1:8000` (see configuration above)
 with a search form, result cards, and the same sorting/filtering options as
 the CLI, backed by the same `PeopleService` pipeline.
 
+### IPC — talk to LinkDogger from other processes
+
+```bash
+linkdogger ipc-serve                       # start the local JSON-over-HTTP server
+linkdogger ipc ping                        # quick health check
+linkdogger ipc status                      # version + backend
+linkdogger ipc search "OpenAI" --provider github
+linkdogger ipc export_emails "OpenAI" --limit 20
+```
+
+The server binds to `127.0.0.1:8123` (`LINKDOGGER_IPC_HOST/PORT`) and accepts
+`POST /rpc` with `{"method": ..., "params": {...}}`. Scripts can use the
+`linkdogger.ipc.IPCClient` class directly; set `LINKDOGGER_IPC_TOKEN` to
+require `Authorization: Bearer <token>`.
+
+### MCP — drive LinkDogger from an AI assistant
+
+```bash
+linkdogger mcp
+```
+
+Runs a Model Context Protocol server over stdio (JSON-RPC 2.0, no SDK
+needed). Point your MCP client at it and it can call `search_company`,
+`export_emails` and `get_status` tools to discover people and build
+outreach lists from inside the assistant.
+
+### Email outreach — send from the exported contacts file
+
+```bash
+# 1. Discover people and export their email addresses
+linkdogger search "OpenAI" --export email
+
+# 2. Preview the messages (always do this first)
+linkdogger send openai.emails.json --dry-run
+linkdogger send openai.emails.json --dry-run --subject "Hi {name} from OpenAI" --body-file template.txt
+
+# 3. Send for real (configure LINKDOGGER_SMTP_HOST in .env)
+linkdogger send openai.emails.json --subject "..." --body-file template.txt
+```
+
+Templates support the placeholders `{name}`, `{company}`, `{position}` and
+`{from_name}` (sender name). `--delay` sets the pause between sends
+(default 1s) to behave politely with recipient servers. Delivery failures
+are isolated per recipient — one bad address never aborts the batch.
+
+### Watch — observe replies and inform yourself
+
+```bash
+linkdogger watch openai.emails.json --once          # single scan (scripts/CI)
+linkdogger watch openai.emails.json --report replies.json
+linkdogger watch openai.emails.json --interval 300  # poll every 5 minutes
+```
+
+The observer connects to your inbox (configure `LINKDOGGER_IMAP_HOST` in
+.env), matches inbound messages against the contacts you wrote to, and
+reports who replied, when, and a preview of what they said. `--since-days`
+limits the scan window (default 7); new replies are printed as they arrive,
+duplicates are filtered by IMAP UID, and `--report` writes findings as JSON.
+
 > **Note:** the mock backend returns clearly marked sample data (source
 > `mock-sample-data`). Unavailable information is `null` — never guessed.
 
@@ -327,7 +386,15 @@ linkdogger/
 │       ├── output/
 │       │   ├── json.py
 │       │   ├── table.py
-│       │   └── export.py          # JSON / CSV / Markdown
+│       │   └── export.py          # JSON / CSV / Markdown / email payload
+│       ├── ipc/
+│       │   ├── server.py          # local JSON-over-HTTP server
+│       │   └── client.py          # IPCClient for scripts
+│       ├── mcp_server.py          # Model Context Protocol stdio server
+│       ├── mail/
+│       │   ├── contacts.py        # load contacts from exported JSON
+│       │   ├── sender.py          # SMTP outbox (linkdogger send)
+│       │   └── observer.py        # IMAP reply watcher (linkdogger watch)
 │       └── web/
 │           ├── app.py             # FastAPI factory
 │           ├── routes.py

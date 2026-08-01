@@ -207,3 +207,122 @@ def test_linkedin_login_rejects_empty_cookies(tmp_path, monkeypatch) -> None:
     result = runner.invoke(app, ["linkedin-login"], input="\n")
     assert result.exit_code != 0
     assert not cookie_file.exists()
+
+
+def _write_contacts_file(path) -> None:
+    path.write_text(
+        json.dumps(
+            {
+                "emails": ["alice@example.com", "bob@example.com"],
+                "people": [
+                    {"name": "Alice", "email": "alice@example.com"},
+                    {"name": "Bob", "email": "bob@example.com"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_send_dry_run_previews_without_smtp(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    _write_contacts_file(tmp_path / "emails.json")
+    result = runner.invoke(app, ["send", "emails.json", "--dry-run", "--delay", "0"])
+    assert result.exit_code == 0
+    assert "Dry run" in result.output
+    assert "previewed 2 of 2 emails" in result.output
+
+
+def test_send_without_smtp_configuration_errors(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    _write_contacts_file(tmp_path / "emails.json")
+    result = runner.invoke(app, ["send", "emails.json"])
+    assert result.exit_code != 0
+    assert "SMTP is not configured" in result.output
+
+
+def test_send_test_email_dry_run_requires_no_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    result = runner.invoke(
+        app,
+        [
+            "send",
+            "--test",
+            "me@example.com",
+            "My title",
+            "My body",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "test email to me@example.com" in result.output
+    assert "My title" in result.output
+
+
+def test_send_test_email_rejects_invalid_address(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    result = runner.invoke(
+        app,
+        ["send", "--test", "not-an-email", "T", "B", "--dry-run"],
+    )
+    assert result.exit_code != 0
+    assert "not a valid email address" in result.output
+
+
+def test_send_test_email_without_smtp_configuration_errors(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    result = runner.invoke(
+        app,
+        ["send", "--test", "me@example.com", "T", "B"],
+    )
+    assert result.exit_code != 0
+    assert "SMTP is not configured" in result.output
+
+
+def test_send_without_file_and_without_test_errors(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    result = runner.invoke(app, ["send"])
+    assert result.exit_code != 0
+    assert "--test" in result.output
+
+
+def test_watch_once_reports_replies(tmp_path, monkeypatch) -> None:
+    import email as email_module
+
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+
+    class FakeIMAP:
+        def __init__(self, host, port=993, timeout=15) -> None:
+            pass
+
+        def login(self, user, password) -> str:
+            return "OK"
+
+        def select(self, folder="INBOX") -> tuple:
+            return ("OK", [b"1"])
+
+        def uid(self, command, *args) -> tuple:
+            if command == "SEARCH":
+                return ("OK", [b"1"])
+            message = email_module.message.EmailMessage()
+            message["From"] = "Alice Example <alice@example.com>"
+            message["Subject"] = "Re: hello"
+            message.set_content("Happy to chat!")
+            raw = message.as_bytes()
+            return ("OK", [(f"1 (UID 1 RFC822 {{{len(raw)}}}".encode(), raw), b")"])
+
+        def logout(self) -> str:
+            return "BYE"
+
+    monkeypatch.setattr(
+        "linkdogger.mail.observer.imaplib.IMAP4_SSL",
+        lambda *a, **k: FakeIMAP(*a, **k),
+    )
+    monkeypatch.setenv("LINKDOGGER_IMAP_HOST", "imap.example.com")
+    _write_contacts_file(tmp_path / "emails.json")
+    result = runner.invoke(app, ["watch", "emails.json", "--once", "--interval", "0"])
+    assert result.exit_code == 0
+    assert "Reply from alice@example.com" in result.output
+    assert "Re: hello" in result.output

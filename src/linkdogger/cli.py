@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import time
 from pathlib import Path
 
 import typer
@@ -10,8 +11,18 @@ from rich.console import Console
 
 from linkdogger import __version__
 from linkdogger.config.settings import get_settings
-from linkdogger.errors import SourceUnavailableError
+from linkdogger.errors import IPCError, MailError, SourceUnavailableError
+from linkdogger.ipc import IPCClient, IPCServer
 from linkdogger.linkedin_api import get_linkedin_client, validate_session
+from linkdogger.mail.contacts import load_contacts, validate_email
+from linkdogger.mail.observer import ReplyObserver, build_reply_report
+from linkdogger.mail.sender import (
+    DEFAULT_BODY,
+    DEFAULT_SUBJECT,
+    send_emails_from_file,
+    send_test_email,
+)
+from linkdogger.mcp_server import serve as mcp_serve
 from linkdogger.output.export import export_emails, export_result
 from linkdogger.output.json import render_json
 from linkdogger.output.table import render_table
@@ -230,6 +241,316 @@ def serve() -> None:
     _run_web()
 
 
+@app.command("ipc-serve")
+def ipc_serve() -> None:
+    """Start the local IPC server (JSON over localhost HTTP, for scripts)."""
+    settings = get_settings()
+    server = IPCServer(
+        _build_people_service(),
+        host=settings.ipc_host,
+        port=settings.ipc_port,
+        token=settings.ipc_token,
+        backend=settings.discovery_backend,
+    )
+    console.print("[bold cyan]LinkDogger[/bold cyan] IPC server")
+    console.print(
+        f"Listening on [bold]http://{settings.ipc_host}:{settings.ipc_port}/rpc[/bold]"
+    )
+    if settings.ipc_token:
+        console.print("Authentication token is enabled.")
+    console.print("Press Ctrl+C to stop.")
+    try:
+        server.start()
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.stop()
+        console.print("[dim]IPC server stopped.[/dim]")
+
+
+@app.command()
+def ipc(
+    method: str = typer.Argument(
+        ...,
+        help="Method to call: ping, status, search or export_emails.",
+    ),
+    company: str | None = typer.Option(
+        None, "--company", "-c", help="Company name (search / export_emails)."
+    ),
+    provider: str = typer.Option(
+        "linkedin",
+        "--provider",
+        help="Data provider: linkedin, github, hybrid, or mock.",
+    ),
+    sort: str | None = typer.Option(
+        None, "--sort", help="Sort key (e.g. followers-desc, name-asc)."
+    ),
+    role: str | None = typer.Option(
+        None, "--role", help="Only show people whose role matches this text."
+    ),
+    location: str | None = typer.Option(
+        None, "--location", help="Only show people whose location matches this text."
+    ),
+    limit: int | None = typer.Option(
+        None, "--limit", help="Maximum number of results."
+    ),
+) -> None:
+    """Call a method on a running IPC server (see ``ipc-serve``)."""
+    if method not in ("ping", "status", "search", "export_emails"):
+        raise typer.BadParameter(
+            f"unknown method '{method}' (expected ping, status, search "
+            "or export_emails)"
+        )
+    if method in ("search", "export_emails") and not company:
+        raise typer.BadParameter(f"--company is required for the '{method}' method")
+    settings = get_settings()
+    client = IPCClient(settings.ipc_host, settings.ipc_port, token=settings.ipc_token)
+    try:
+        if method == "ping":
+            result = client.call("ping")
+        elif method == "status":
+            result = client.call("status")
+        else:
+            result = client.call(
+                method,
+                company=company,
+                sort=sort,
+                role=role,
+                location=location,
+                limit=limit,
+                provider=provider,
+            )
+    except IPCError as exc:
+        raise typer.BadParameter(str(exc)) from None
+    console.print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+@app.command()
+def mcp() -> None:
+    """Run the MCP (Model Context Protocol) stdio server for AI clients."""
+    error_console = Console(stderr=True)
+    settings = get_settings()
+    error_console.print(
+        f"[dim]LinkDogger MCP server (v{__version__}) on stdio — "
+        "speak JSON-RPC here.[/dim]"
+    )
+    code = mcp_serve(_build_people_service(), backend=settings.discovery_backend)
+    raise typer.Exit(code)
+
+
+@app.command()
+def send(
+    file: Path | None = typer.Argument(  # noqa: B008 - typer.Argument default, consistent with sibling options
+        None,
+        help="Exported contacts file (e.g. from --export email); "
+        "not needed with --test.",
+    ),
+    subject: str | None = typer.Option(
+        None,
+        "--subject",
+        help="Subject template; placeholders: {name}, {company}, {position}.",
+    ),
+    body: str | None = typer.Option(
+        None, "--body", help="Body template (see --subject for placeholders)."
+    ),
+    body_file: Path | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        None, "--body-file", help="Read the body template from a UTF-8 text file."
+    ),
+    test: tuple[str, str, str] | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        None,
+        "--test",
+        metavar="EMAIL TITLE BODY",
+        help=(
+            "Send one test email to EMAIL with the given title and body — "
+            'e.g. --test you@gmail.com "My title" "My body". '
+            "No contacts file is needed."
+        ),
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Build and preview every message without connecting to SMTP.",
+    ),
+    delay: float = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        1.0, "--delay", help="Seconds to wait between sends (0 to disable)."
+    ),
+) -> None:
+    """Send personalized emails to every address in an exported contacts file.
+
+    With --test EMAIL "TITLE" "BODY", send a single test email instead,
+    to verify your SMTP setup before any real outreach. Configure the
+    outbox with LINKDOGGER_SMTP_HOST (plus username, password and
+    from-address) in your .env. Always try --dry-run first.
+    """
+    settings = get_settings()
+
+    if test is not None:
+        recipient, title, test_body = test
+        address = validate_email(recipient)
+        if address is None:
+            raise typer.BadParameter(f"'{recipient}' is not a valid email address")
+        if file is not None:
+            console.print("[dim]Ignoring contacts file in --test mode.[/dim]")
+        if dry_run:
+            console.print(
+                "[bold yellow]Dry run[/bold yellow] — no emails will be sent."
+            )
+        elif not settings.smtp_host:
+            raise typer.BadParameter(
+                "SMTP is not configured: set LINKDOGGER_SMTP_HOST (and "
+                "LINKDOGGER_SMTP_USERNAME/PASSWORD/FROM) in your .env first"
+            )
+        try:
+            report = send_test_email(
+                address,
+                title,
+                test_body,
+                settings=settings,
+                dry_run=dry_run,
+            )
+        except MailError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        console.print(
+            f"[bold cyan]LinkDogger[/bold cyan] "
+            f"{'previewed' if dry_run else 'sent'} test email to {address}"
+        )
+        console.print(f"  Subject: {title}")
+        if not dry_run and report.failed:
+            console.print(f"[red]Failed[/red] {report.failed[0][1]}")
+        console.print("[dim]Check the inbox and spam folder to confirm delivery.[/dim]")
+        return
+
+    if file is None:
+        raise typer.BadParameter(
+            "missing contacts file argument (or use --test EMAIL TITLE BODY)"
+        )
+    if body_file is not None:
+        try:
+            body = body_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise typer.BadParameter(f"could not read body file: {exc}") from None
+    subject = subject if subject is not None else DEFAULT_SUBJECT
+    body = body if body is not None else DEFAULT_BODY
+
+    if dry_run:
+        console.print("[bold yellow]Dry run[/bold yellow] — no emails will be sent.")
+    elif not settings.smtp_host:
+        raise typer.BadParameter(
+            "SMTP is not configured: set LINKDOGGER_SMTP_HOST (and "
+            "LINKDOGGER_SMTP_USERNAME/PASSWORD/FROM) in your .env first"
+        )
+
+    try:
+        report = send_emails_from_file(
+            str(file),
+            subject=subject,
+            body=body,
+            settings=settings,
+            dry_run=dry_run,
+            delay_seconds=delay,
+        )
+    except MailError as exc:
+        raise typer.BadParameter(str(exc)) from None
+
+    verb = "Previewed" if dry_run else "Sent"
+    console.print(
+        f"[bold cyan]LinkDogger[/bold cyan] {verb.lower()} {len(report.sent)} "
+        f"of {report.total} emails"
+    )
+    if not dry_run:
+        if report.sent:
+            console.print("[green]Delivered to:[/green] " + ", ".join(report.sent))
+        for email, error in report.failed:
+            console.print(f"[red]Failed[/red] {email}: {error}")
+    console.print(
+        "[dim]Use --dry-run to preview messages before sending for real.[/dim]"
+    )
+
+
+@app.command()
+def watch(
+    file: Path = typer.Argument(  # noqa: B008 - typer.Argument default, consistent with sibling options
+        ..., help="Exported contacts file whose replies should be watched."
+    ),
+    once: bool = typer.Option(
+        False,
+        "--once",
+        help="Scan the inbox a single time and exit (for scripts/CI).",
+    ),
+    interval: float = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        60.0, "--interval", help="Seconds between scans when not using --once."
+    ),
+    since_days: int | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        7, "--since-days", help="Only scan messages newer than N days (0 = all)."
+    ),
+    report: Path | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        None,
+        "--report",
+        help="Write the reply findings to this JSON file on every scan.",
+    ),
+) -> None:
+    """Watch the inbox for replies from contacts in an exported file.
+
+    Configure the inbox with LINKDOGGER_IMAP_HOST (plus username,
+    password) in your .env. The observer reports who replied, when,
+    and a preview of what they said.
+    """
+    settings = get_settings()
+    if not settings.imap_host:
+        raise typer.BadParameter(
+            "IMAP is not configured: set LINKDOGGER_IMAP_HOST (and "
+            "LINKDOGGER_IMAP_USERNAME/PASSWORD) in your .env first"
+        )
+    try:
+        contacts = load_contacts(file)
+    except MailError as exc:
+        raise typer.BadParameter(str(exc)) from None
+
+    observer = ReplyObserver(settings)
+    seen: set[str] = set()
+
+    def scan() -> list:
+        replies = observer.scan(contacts, since_days=since_days or None)
+        fresh = [reply for reply in replies if reply.uid not in seen]
+        seen.update(reply.uid for reply in replies)
+        return fresh
+
+    try:
+        while True:
+            fresh = scan()
+            if fresh:
+                for reply in fresh:
+                    console.print(f"[green]Reply from {reply.sender}[/green]")
+                    console.print(f"  Subject: {reply.subject}")
+                    if reply.date:
+                        console.print(f"  Date:    {reply.date}")
+                    console.print(f"  {reply.preview}")
+                    console.print()
+                console.print(f"[bold]{len(fresh)} new reply/replies found[/bold]")
+            else:
+                console.print("[dim]No replies yet from the watched contacts.[/dim]")
+            if report is not None:
+                try:
+                    report.write_text(
+                        json.dumps(
+                            build_reply_report(observer.scan(contacts), contacts),
+                            indent=2,
+                            ensure_ascii=False,
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                except OSError as exc:
+                    raise typer.BadParameter(f"could not write report: {exc}") from None
+            if once:
+                break
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Watch stopped.[/dim]")
+
+
 def _linkedin_login() -> None:
     settings = get_settings()
     cookie_file = settings.linkedin_cookie_file
@@ -333,6 +654,20 @@ def config() -> None:
             "LINKDOGGER_LINKEDIN_COOKIE_FILE",
             settings.linkedin_cookie_file or "(not set)",
         ),
+        ("LINKDOGGER_IPC_HOST", settings.ipc_host),
+        ("LINKDOGGER_IPC_PORT", str(settings.ipc_port)),
+        ("LINKDOGGER_IPC_TOKEN", _redact(settings.ipc_token)),
+        ("LINKDOGGER_SMTP_HOST", settings.smtp_host or "(not set)"),
+        ("LINKDOGGER_SMTP_PORT", str(settings.smtp_port)),
+        ("LINKDOGGER_SMTP_USERNAME", settings.smtp_username or "(not set)"),
+        ("LINKDOGGER_SMTP_PASSWORD", _redact(settings.smtp_password)),
+        ("LINKDOGGER_SMTP_FROM", settings.smtp_from or "(not set)"),
+        ("LINKDOGGER_SMTP_FROM_NAME", settings.smtp_from_name or "(not set)"),
+        ("LINKDOGGER_IMAP_HOST", settings.imap_host or "(not set)"),
+        ("LINKDOGGER_IMAP_PORT", str(settings.imap_port)),
+        ("LINKDOGGER_IMAP_USERNAME", settings.imap_username or "(not set)"),
+        ("LINKDOGGER_IMAP_PASSWORD", _redact(settings.imap_password)),
+        ("LINKDOGGER_IMAP_FOLDER", settings.imap_folder),
     ]
     for name, value in fields:
         console.print(f"  [bold]{name}[/bold] = {value}")
@@ -394,3 +729,28 @@ def doctor() -> None:
     console.print(
         f"  Run `linkdogger serve` (http://{settings.web_host}:{settings.web_port})"
     )
+    console.print()
+    console.print("[bold]Local IPC[/bold]")
+    console.print(
+        f"  Run `linkdogger ipc-serve` (http://{settings.ipc_host}:{settings.ipc_port})"
+    )
+    console.print(
+        "  Authentication: "
+        + ("token enabled" if settings.ipc_token else "none (localhost only)")
+    )
+    console.print()
+    console.print("[bold]Email outreach[/bold]")
+    if settings.smtp_host:
+        console.print(f"  smtp  configured ({settings.smtp_host}:{settings.smtp_port})")
+    else:
+        console.print(
+            "  smtp  [yellow]not configured[/yellow] (set LINKDOGGER_SMTP_HOST "
+            "for `linkdogger send`)"
+        )
+    if settings.imap_host:
+        console.print(f"  imap  configured ({settings.imap_host}:{settings.imap_port})")
+    else:
+        console.print(
+            "  imap  [yellow]not configured[/yellow] (set LINKDOGGER_IMAP_HOST "
+            "for `linkdogger watch`)"
+        )

@@ -37,3 +37,11 @@ class EnrichmentIncompleteError(LinkDoggerError):
     def __init__(self, message: str, skipped: int) -> None:
         super().__init__(message)
         self.skipped = skipped
+
+
+class IPCError(LinkDoggerError):
+    """The local IPC server or a client call failed."""
+
+
+class MailError(LinkDoggerError):
+    """Email sending or mailbox watching failed."""

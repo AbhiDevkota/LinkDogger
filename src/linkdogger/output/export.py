@@ -62,14 +62,8 @@ def export_result(result: SearchResult, path: Path) -> str:
     )
 
 
-def export_emails(result: SearchResult, path: Path) -> str:
-    """Write every discovered email address to ``path`` as JSON.
-
-    Only people with an email address are included; the document lists
-    them twice — a flat ``emails`` array for pasting into tools, and
-    ``people`` with name/position context. Returns a short description
-    of what was exported.
-    """
+def emails_payload(result: SearchResult) -> dict:
+    """Build the email-export document for ``result`` (see ``export_emails``)."""
     people = [
         {
             "name": person.name,
@@ -80,7 +74,7 @@ def export_emails(result: SearchResult, path: Path) -> str:
         for person in result.results
         if person.email
     ]
-    payload = {
+    return {
         "schema_version": EMAIL_SCHEMA_VERSION,
         "query": result.query,
         "company": result.company.name if result.company else None,
@@ -89,10 +83,22 @@ def export_emails(result: SearchResult, path: Path) -> str:
         "emails": [entry["email"] for entry in people],
         "people": people,
     }
+
+
+def export_emails(result: SearchResult, path: Path) -> str:
+    """Write every discovered email address to ``path`` as JSON.
+
+    Only people with an email address are included; the document lists
+    them twice — a flat ``emails`` array for pasting into tools, and
+    ``people`` with name/position context. Returns a short description
+    of what was exported.
+    """
     path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        json.dumps(emails_payload(result), indent=2, ensure_ascii=False) + "\n",
+        encoding="utf-8",
     )
-    return f"Exported {len(people)} email(s) to {path} (JSON)"
+    count = sum(1 for person in result.results if person.email)
+    return f"Exported {count} email(s) to {path} (JSON)"
 
 
 def render_csv(result: SearchResult) -> str:
