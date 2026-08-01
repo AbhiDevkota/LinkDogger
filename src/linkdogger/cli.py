@@ -15,7 +15,7 @@ from linkdogger.config.settings import get_settings
 from linkdogger.errors import AIError, IPCError, MailError, SourceUnavailableError
 from linkdogger.ipc import IPCClient, IPCServer
 from linkdogger.linkedin_api import get_linkedin_client, validate_session
-from linkdogger.mail.contacts import load_contacts, validate_email
+from linkdogger.mail.contacts import Contact, load_contacts, validate_email
 from linkdogger.mail.observer import ReplyObserver, build_reply_report
 from linkdogger.mail.sender import (
     DEFAULT_BODY,
@@ -60,6 +60,14 @@ def _print_warnings(result: object) -> None:
     if warnings:
         for warning in warnings:
             console.print(f"[yellow]Warning:[/yellow] {warning}")
+
+
+def _preview_drafts(contacts: list[Contact], drafts: list[EmailDraft]) -> None:
+    """Print recipient, subject and body for every generated draft."""
+    for contact, draft in zip(contacts, drafts, strict=True):
+        console.print(f"[bold]{contact.email}[/bold]")
+        console.print(f"  Subject: {draft.subject}")
+        console.print(f"  {draft.body}")
 
 
 def _slugify(value: str) -> str:
@@ -368,6 +376,14 @@ def send(
             "instead of --subject/--body. Set LINKDOGGER_AI_API_KEY in .env."
         ),
     ),
+    view: bool = typer.Option(
+        False,
+        "--view",
+        help=(
+            "Preview every message (recipient, subject, body) and ask "
+            "for confirmation before sending anything."
+        ),
+    ),
     test: tuple[str, str, str] | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
         None,
         "--test",
@@ -392,9 +408,11 @@ def send(
     With --test EMAIL "TITLE" "BODY", send a single test email instead,
     to verify your SMTP setup before any real outreach. With --generate,
     every subject and body is drafted by AI (DeepSeek V4 Flash via
-    NVIDIA NIM) instead of the --subject/--body template. Configure the
-    outbox with LINKDOGGER_SMTP_HOST (plus username, password and
-    from-address) in your .env. Always try --dry-run first.
+    NVIDIA NIM) instead of the --subject/--body template. With --view,
+    every message is shown for review and you are asked to confirm
+    before anything is sent. Configure the outbox with LINKDOGGER_SMTP_HOST
+    (plus username, password and from-address) in your .env. Always try
+    --dry-run first.
     """
     settings = get_settings()
 
@@ -461,12 +479,15 @@ def send(
             console.print(
                 "[bold yellow]Dry run[/bold yellow] — no emails will be sent."
             )
-            for contact, draft in zip(contacts, drafts, strict=True):
-                console.print(f"[bold]{contact.email}[/bold]")
-                console.print(f"  Subject: {draft.subject}")
-                console.print(f"  {draft.body}")
+            _preview_drafts(contacts, drafts)
             console.print(f"[dim]Generated {len(drafts)} draft(s).[/dim]")
             return
+        if view:
+            console.print("[bold cyan]Review[/bold cyan] — nothing has been sent yet.")
+            _preview_drafts(contacts, drafts)
+            if not typer.confirm(f"Send these {len(drafts)} email(s)?", default=False):
+                console.print("[dim]Aborted — nothing was sent.[/dim]")
+                return
         if not settings.smtp_host:
             raise typer.BadParameter(
                 "SMTP is not configured: set LINKDOGGER_SMTP_HOST (and "
@@ -498,6 +519,22 @@ def send(
             raise typer.BadParameter(f"could not read body file: {exc}") from None
     subject = subject if subject is not None else DEFAULT_SUBJECT
     body = body if body is not None else DEFAULT_BODY
+
+    if view and not dry_run:
+        console.print("[bold cyan]Review[/bold cyan] — nothing has been sent yet.")
+        console.print(f"  Subject: {subject}")
+        console.print(f"  Body:\n{body}")
+        try:
+            contacts = load_contacts(file)
+        except MailError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        console.print(
+            "[green]Will send to:[/green] "
+            + ", ".join(contact.email for contact in contacts)
+        )
+        if not typer.confirm(f"Send these {len(contacts)} email(s)?", default=False):
+            console.print("[dim]Aborted — nothing was sent.[/dim]")
+            return
 
     if dry_run:
         console.print("[bold yellow]Dry run[/bold yellow] — no emails will be sent.")
@@ -825,7 +862,18 @@ def doctor() -> None:
     console.print()
     console.print("[bold]AI generation[/bold]")
     if settings.ai_api_key:
-        console.print(f"  ai    configured (model: {settings.ai_model})")
+        try:
+            summary = DraftGenerator(settings).check()
+        except AIError as exc:
+            console.print(
+                f"  ai    [red]endpoint check failed:[/red] {exc} "
+                f"(model: {settings.ai_model})"
+            )
+        else:
+            console.print(
+                f"  ai    [green]endpoint ok:[/green] {summary} "
+                f"(model: {settings.ai_model})"
+            )
     else:
         console.print(
             "  ai    [yellow]not configured[/yellow] (set "

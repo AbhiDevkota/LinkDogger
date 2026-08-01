@@ -38,9 +38,19 @@ class FakeClient:
         self.kwargs = kwargs
         FakeClient.instances.append(self)
 
+    def __enter__(self) -> "FakeClient":
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        pass
+
     def post(self, url: str, json: object | None = None) -> FakeResponse:
         self.last_url = url
         self.last_payload = json
+        return FakeClient.responses.pop(0)
+
+    def get(self, url: str) -> FakeResponse:
+        self.last_url = url
         return FakeClient.responses.pop(0)
 
 
@@ -139,3 +149,37 @@ def test_generate_raises_on_missing_fields() -> None:
     FakeClient.responses.append(FakeResponse(_completion('{"subject": "only"}')))
     with pytest.raises(AIError, match="missing 'subject' or 'body'"):
         DraftGenerator(_settings()).generate(_contact())
+
+
+def test_check_reports_model_count() -> None:
+    FakeClient.responses.append(
+        FakeResponse(
+            {
+                "data": [
+                    {"id": "deepseek-ai/deepseek-v4-flash"},
+                    {"id": "nvidia/nemotron-3-super-120b"},
+                ]
+            }
+        )
+    )
+    generator = DraftGenerator(_settings())
+    assert generator.check() == "ok (2 models)"
+    assert FakeClient.instances[1].last_url == "/models"
+
+
+def test_check_warns_when_configured_model_not_listed() -> None:
+    FakeClient.responses.append(FakeResponse({"data": [{"id": "other/model"}]}))
+    result = DraftGenerator(_settings()).check()
+    assert "ok (1 models)" in result
+    assert "not listed" in result
+
+
+def test_check_raises_on_http_error() -> None:
+    FakeClient.responses.append(FakeResponse({"error": "bad key"}, status_code=401))
+    with pytest.raises(AIError, match="HTTP 401"):
+        DraftGenerator(_settings()).check()
+
+
+def test_check_requires_api_key() -> None:
+    with pytest.raises(AIError, match="AI_API_KEY"):
+        DraftGenerator(Settings(_env_file=None, ai_api_key=None)).check()

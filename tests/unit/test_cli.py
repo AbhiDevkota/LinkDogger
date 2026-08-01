@@ -7,6 +7,7 @@ from typer.testing import CliRunner
 from linkdogger import __version__
 from linkdogger.ai.generator import EmailDraft
 from linkdogger.cli import app
+from linkdogger.errors import AIError
 
 runner = CliRunner()
 
@@ -397,3 +398,111 @@ def test_send_generate_sends_via_smtp(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert "sent 2 of 2 emails" in result.output
     assert [m["Subject"] for m in FakeSMTP.messages] == ["Hi Alice", "Hi Bob"]
+
+
+def test_doctor_checks_ai_endpoint(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    monkeypatch.setenv("LINKDOGGER_AI_API_KEY", "nvapi-test")
+
+    class FakeGen:
+        def check(self) -> str:
+            return "ok (123 models)"
+
+    monkeypatch.setattr("linkdogger.cli.DraftGenerator", lambda settings: FakeGen())
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0
+    assert "endpoint ok: ok (123 models)" in result.output
+
+
+def test_doctor_reports_ai_endpoint_failure(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    monkeypatch.setenv("LINKDOGGER_AI_API_KEY", "nvapi-test")
+
+    class FakeGen:
+        def check(self) -> str:
+            raise AIError("endpoint returned HTTP 401")
+
+    monkeypatch.setattr("linkdogger.cli.DraftGenerator", lambda settings: FakeGen())
+    result = runner.invoke(app, ["doctor"])
+    assert result.exit_code == 0
+    assert "endpoint check failed: endpoint returned HTTP 401" in result.output
+
+
+def test_send_generate_view_aborts_without_sending(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    monkeypatch.setenv("LINKDOGGER_AI_API_KEY", "nvapi-test")
+    _write_contacts_file(tmp_path / "emails.json")
+
+    class FakeGen:
+        def generate(self, contact):
+            return EmailDraft(f"Hi {contact.name}", "Generated body.")
+
+    monkeypatch.setattr("linkdogger.cli.DraftGenerator", lambda settings: FakeGen())
+    result = runner.invoke(
+        app,
+        ["send", "emails.json", "--generate", "--view", "--delay", "0"],
+        input="n\n",
+    )
+    assert result.exit_code == 0
+    assert "nothing has been sent yet" in result.output
+    assert "Hi Alice" in result.output
+    assert "alice@example.com" in result.output
+    assert "Aborted" in result.output
+
+
+def test_send_generate_view_confirms_and_sends(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    monkeypatch.setenv("LINKDOGGER_AI_API_KEY", "nvapi-test")
+    monkeypatch.setenv("LINKDOGGER_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("LINKDOGGER_SMTP_FROM", "outbox@example.com")
+    _write_contacts_file(tmp_path / "emails.json")
+
+    class FakeGen:
+        def generate(self, contact):
+            return EmailDraft(f"Hi {contact.name}", "Generated body.")
+
+    monkeypatch.setattr("linkdogger.cli.DraftGenerator", lambda settings: FakeGen())
+
+    class FakeSMTP:
+        messages: list = []
+
+        def __init__(self, host, port=587, timeout=15) -> None:
+            pass
+
+        def ehlo(self) -> None:
+            pass
+
+        def starttls(self) -> None:
+            pass
+
+        def login(self, user, password) -> None:
+            pass
+
+        def send_message(self, message) -> None:
+            FakeSMTP.messages.append(message)
+
+        def quit(self) -> None:
+            pass
+
+    monkeypatch.setattr("linkdogger.mail.sender.smtplib.SMTP", FakeSMTP)
+    result = runner.invoke(
+        app,
+        ["send", "emails.json", "--generate", "--view", "--delay", "0"],
+        input="y\n",
+    )
+    assert result.exit_code == 0
+    assert "sent 2 of 2 emails" in result.output
+    assert [m["Subject"] for m in FakeSMTP.messages] == ["Hi Alice", "Hi Bob"]
+
+
+def test_send_view_template_aborts_without_sending(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    _write_contacts_file(tmp_path / "emails.json")
+    result = runner.invoke(
+        app, ["send", "emails.json", "--view", "--delay", "0"], input="n\n"
+    )
+    assert result.exit_code == 0
+    assert "nothing has been sent yet" in result.output
+    assert "Will send to:" in result.output
+    assert "alice@example.com, bob@example.com" in result.output
+    assert "Aborted" in result.output

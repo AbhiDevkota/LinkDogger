@@ -74,6 +74,37 @@ class DraftGenerator:
         except httpx.HTTPError as exc:
             raise AIError(f"AI API request failed: {exc}") from exc
 
+    def check(self) -> str:
+        """Verify the endpoint is reachable and the API key works."""
+        if not self._settings.ai_api_key:
+            raise AIError("LINKDOGGER_AI_API_KEY is not set")
+        try:
+            with httpx.Client(
+                base_url=self._settings.ai_base_url,
+                timeout=10.0,
+                headers={"Authorization": f"Bearer {self._settings.ai_api_key}"},
+            ) as client:
+                response = client.get("/models")
+                response.raise_for_status()
+                data = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise AIError(f"endpoint returned HTTP {exc.response.status_code}") from exc
+        except (httpx.HTTPError, ValueError) as exc:
+            raise AIError(f"endpoint request failed: {exc}") from exc
+        if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+            return "ok"
+        model_ids = [
+            str(item.get("id", ""))
+            for item in data["data"]
+            if isinstance(item, dict) and item.get("id")
+        ]
+        if self._settings.ai_model not in model_ids:
+            return (
+                f"ok ({len(model_ids)} models) — configured model "
+                f"'{self._settings.ai_model}' is not listed"
+            )
+        return f"ok ({len(model_ids)} models)"
+
 
 def generate_drafts(
     contacts: list[Contact],

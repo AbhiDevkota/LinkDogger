@@ -314,10 +314,13 @@ through NVIDIA NIM (build.nvidia.com) with DeepSeek V4 Flash:
 # 1. Get a free API key from https://build.nvidia.com and set it in .env
 #    LINKDOGGER_AI_API_KEY=nvapi-...
 
-# 2. Preview what the model wrote (no emails sent)
-linkdogger send openai.emails.json --generate --dry-run
+# 2. Check the endpoint works (run with `linkdogger doctor`)
+linkdogger doctor
 
-# 3. Send the generated drafts for real
+# 3. Review the drafts, then confirm before anything is sent
+linkdogger send openai.emails.json --generate --view
+
+# 4. Send the generated drafts for real
 linkdogger send openai.emails.json --generate
 ```
 
@@ -325,7 +328,9 @@ Each contact gets its own draft generated from their name, company and
 position (plus your `LINKDOGGER_SMTP_FROM_NAME`). Point the generator at
 any OpenAI-compatible endpoint with `LINKDOGGER_AI_BASE_URL` /
 `LINKDOGGER_AI_MODEL`. Drafts are 2-4 sentence, low-pressure outreach
-messages; always review a `--dry-run` before sending.
+messages; `doctor` verifies the endpoint and API key live, and `--view`
+shows every message (recipient, subject, body) and asks you to confirm
+before sending. Always review a `--dry-run` as well.
 
 ### Watch — observe replies and inform yourself
 
