@@ -354,8 +354,8 @@ def mcp() -> None:
 def send(
     file: str | None = typer.Argument(  # noqa: B008 - typer.Argument default, consistent with sibling options
         None,
-        help="Exported contacts file (e.g. from --export email) or a single "
-        "email address (e.g. you@gmail.com); not needed with --test.",
+        help="Contacts file ending in .json (sends to every contact) or a "
+        "single email address (e.g. you@gmail.com); not needed with --test.",
     ),
     subject: str | None = typer.Option(
         None,
@@ -405,15 +405,17 @@ def send(
 ) -> None:
     """Send personalized emails to every address in an exported contacts file.
 
-    Pass a single email address instead of a contacts file to send to
-    just that address. With --test EMAIL "TITLE" "BODY", send a single
-    test email instead, to verify your SMTP setup before any real
-    outreach. With --generate, every subject and body is drafted by AI
-    (DeepSeek V4 Flash via NVIDIA NIM) instead of the --subject/--body
-    template. With --view, every message is shown for review and you are
-    asked to confirm before anything is sent. Configure the outbox with
-    LINKDOGGER_SMTP_HOST (plus username, password and from-address) in
-    your .env. Always try --dry-run first.
+    The argument is auto-detected: a value ending in .json is treated as
+    a contacts file (one email per contact), anything that looks like an
+    email address (…@gmail.com, …@outlook.com, …) is sent to directly.
+    With --test EMAIL "TITLE" "BODY", send a single test email instead,
+    to verify your SMTP setup before any real outreach. With --generate,
+    every subject and body is drafted by AI (DeepSeek V4 Flash via
+    NVIDIA NIM) instead of the --subject/--body template. With --view,
+    every message is shown for review and you are asked to confirm
+    before anything is sent. Configure the outbox with LINKDOGGER_SMTP_HOST
+    (plus username, password and from-address) in your .env. Always try
+    --dry-run first.
     """
     settings = get_settings()
 
@@ -458,7 +460,7 @@ def send(
             "missing contacts file or email address (or use --test EMAIL TITLE BODY)"
         )
 
-    single_email = validate_email(file)
+    single_email = None if file.lower().endswith(".json") else validate_email(file)
     if single_email is not None:
         contacts = [Contact(email=single_email)]
     else:

@@ -588,3 +588,13 @@ def test_send_single_email_view_aborts(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert "Will send to: rubync2020@gmail.com" in result.output
     assert "Aborted" in result.output
+
+
+def test_send_json_suffix_always_means_contacts_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    _write_contacts_file(tmp_path / "alice@example.com.json")
+    result = runner.invoke(
+        app, ["send", "alice@example.com.json", "--dry-run", "--delay", "0"]
+    )
+    assert result.exit_code == 0
+    assert "previewed 2 of 2 emails" in result.output
