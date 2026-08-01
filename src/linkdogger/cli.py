@@ -669,3 +669,28 @@ def doctor() -> None:
     console.print(
         f"  Run `linkdogger serve` (http://{settings.web_host}:{settings.web_port})"
     )
+    console.print()
+    console.print("[bold]Local IPC[/bold]")
+    console.print(
+        f"  Run `linkdogger ipc-serve` (http://{settings.ipc_host}:{settings.ipc_port})"
+    )
+    console.print(
+        "  Authentication: "
+        + ("token enabled" if settings.ipc_token else "none (localhost only)")
+    )
+    console.print()
+    console.print("[bold]Email outreach[/bold]")
+    if settings.smtp_host:
+        console.print(f"  smtp  configured ({settings.smtp_host}:{settings.smtp_port})")
+    else:
+        console.print(
+            "  smtp  [yellow]not configured[/yellow] (set LINKDOGGER_SMTP_HOST "
+            "for `linkdogger send`)"
+        )
+    if settings.imap_host:
+        console.print(f"  imap  configured ({settings.imap_host}:{settings.imap_port})")
+    else:
+        console.print(
+            "  imap  [yellow]not configured[/yellow] (set LINKDOGGER_IMAP_HOST "
+            "for `linkdogger watch`)"
+        )
