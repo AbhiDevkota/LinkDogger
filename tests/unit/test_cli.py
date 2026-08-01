@@ -336,8 +336,8 @@ def test_send_generate_dry_run_previews_drafts(tmp_path, monkeypatch) -> None:
     _write_contacts_file(tmp_path / "emails.json")
 
     class FakeGen:
-        def generate(self, contact):
-            return EmailDraft(f"Hi {contact.name}", "Generated body.")
+        def generate_template(self):
+            return EmailDraft("Hi {name}", "Generated body.")
 
     monkeypatch.setattr("linkdogger.cli.DraftGenerator", lambda settings: FakeGen())
     result = runner.invoke(
@@ -345,10 +345,10 @@ def test_send_generate_dry_run_previews_drafts(tmp_path, monkeypatch) -> None:
     )
     assert result.exit_code == 0
     assert "Dry run" in result.output
-    assert "Generating draft for alice@example.com" in result.output
+    assert "Generating email template" in result.output
     assert "Hi Alice" in result.output
     assert "Generated body." in result.output
-    assert "Generated 2 draft(s)" in result.output
+    assert "placeholder" in result.output.lower()
 
 
 def test_send_generate_without_api_key_errors(tmp_path, monkeypatch) -> None:
@@ -367,8 +367,8 @@ def test_send_generate_sends_via_smtp(tmp_path, monkeypatch) -> None:
     _write_contacts_file(tmp_path / "emails.json")
 
     class FakeGen:
-        def generate(self, contact):
-            return EmailDraft(f"Hi {contact.name}", "Generated body.")
+        def generate_template(self):
+            return EmailDraft("Hi {name}", "Generated body.")
 
     monkeypatch.setattr("linkdogger.cli.DraftGenerator", lambda settings: FakeGen())
 
@@ -434,8 +434,8 @@ def test_send_generate_view_aborts_without_sending(tmp_path, monkeypatch) -> Non
     _write_contacts_file(tmp_path / "emails.json")
 
     class FakeGen:
-        def generate(self, contact):
-            return EmailDraft(f"Hi {contact.name}", "Generated body.")
+        def generate_template(self):
+            return EmailDraft("Hi {name}", "Generated body.")
 
     monkeypatch.setattr("linkdogger.cli.DraftGenerator", lambda settings: FakeGen())
     result = runner.invoke(
@@ -458,8 +458,8 @@ def test_send_generate_view_confirms_and_sends(tmp_path, monkeypatch) -> None:
     _write_contacts_file(tmp_path / "emails.json")
 
     class FakeGen:
-        def generate(self, contact):
-            return EmailDraft(f"Hi {contact.name}", "Generated body.")
+        def generate_template(self):
+            return EmailDraft("Hi {name}", "Generated body.")
 
     monkeypatch.setattr("linkdogger.cli.DraftGenerator", lambda settings: FakeGen())
 
@@ -565,8 +565,8 @@ def test_send_single_email_generate_dry_run(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("LINKDOGGER_AI_API_KEY", "nvapi-test")
 
     class FakeGen:
-        def generate(self, contact):
-            return EmailDraft(f"Hi {contact.email}", "Single body.")
+        def generate_template(self):
+            return EmailDraft("Hi {name}", "Single body.")
 
     monkeypatch.setattr("linkdogger.cli.DraftGenerator", lambda settings: FakeGen())
     result = runner.invoke(
@@ -575,7 +575,7 @@ def test_send_single_email_generate_dry_run(tmp_path, monkeypatch) -> None:
     )
     assert result.exit_code == 0
     assert "Hi rubync2020@gmail.com" in result.output
-    assert "Generated 1 draft(s)" in result.output
+    assert "Single body." in result.output
 
 
 def test_send_single_email_view_aborts(tmp_path, monkeypatch) -> None:

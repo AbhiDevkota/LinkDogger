@@ -310,8 +310,9 @@ are isolated per recipient — one bad address never aborts the batch.
 
 ### AI-generated outreach — `send --generate`
 
-Let an LLM draft every subject and body for you, personalized per contact,
-through NVIDIA NIM (build.nvidia.com) with DeepSeek V4 Flash:
+Let an LLM write a professional outreach email template for you — a
+single API call per batch, personalized per contact — through NVIDIA NIM
+(build.nvidia.com) with DeepSeek V4 Flash:
 
 ```bash
 # 1. Get a free API key from https://build.nvidia.com and set it in .env
@@ -327,13 +328,14 @@ linkdogger send openai.emails.json --generate --view
 linkdogger send openai.emails.json --generate
 ```
 
-Each contact gets its own draft generated from their name, company and
-position (plus your `LINKDOGGER_SMTP_FROM_NAME`). Point the generator at
-any OpenAI-compatible endpoint with `LINKDOGGER_AI_BASE_URL` /
-`LINKDOGGER_AI_MODEL`. Drafts are 2-4 sentence, low-pressure outreach
-messages; `doctor` verifies the endpoint and API key live, and `--view`
-shows every message (recipient, subject, body) and asks you to confirm
-before sending. Always review a `--dry-run` as well.
+One template is generated (greeting, value, low-pressure ask, sign-off)
+using the `{name}`, `{company}`, `{position}` and `{from_name}`
+placeholders, then each recipient gets their own personalized copy.
+Point the generator at any OpenAI-compatible endpoint with
+`LINKDOGGER_AI_BASE_URL` / `LINKDOGGER_AI_MODEL`. Transient API errors
+(rate limits, 5xx) are retried automatically. `doctor` verifies the
+endpoint and API key live, and `--view` shows every message (recipient,
+subject, body) and asks you to confirm before sending.
 
 ### Watch — observe replies and inform yourself
 

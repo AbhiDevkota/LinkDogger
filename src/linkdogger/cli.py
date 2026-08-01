@@ -11,7 +11,7 @@ from rich.console import Console
 
 from linkdogger import __version__
 from linkdogger.ai.generator import DraftGenerator, EmailDraft
-from linkdogger.config.settings import get_settings
+from linkdogger.config.settings import Settings, get_settings
 from linkdogger.errors import AIError, IPCError, MailError, SourceUnavailableError
 from linkdogger.ipc import IPCClient, IPCServer
 from linkdogger.linkedin_api import get_linkedin_client, validate_session
@@ -20,8 +20,8 @@ from linkdogger.mail.observer import ReplyObserver, build_reply_report
 from linkdogger.mail.sender import (
     DEFAULT_BODY,
     DEFAULT_SUBJECT,
+    build_message,
     send_emails,
-    send_generated,
     send_test_email,
 )
 from linkdogger.mcp_server import serve as mcp_serve
@@ -62,12 +62,15 @@ def _print_warnings(result: object) -> None:
             console.print(f"[yellow]Warning:[/yellow] {warning}")
 
 
-def _preview_drafts(contacts: list[Contact], drafts: list[EmailDraft]) -> None:
-    """Print recipient, subject and body for every generated draft."""
-    for contact, draft in zip(contacts, drafts, strict=True):
+def _preview_drafts(
+    contacts: list[Contact], draft: EmailDraft, settings: Settings
+) -> None:
+    """Print recipient, personalized subject and body for every contact."""
+    for contact in contacts:
+        message = build_message(contact, draft.subject, draft.body, settings)
         console.print(f"[bold]{contact.email}[/bold]")
-        console.print(f"  Subject: {draft.subject}")
-        console.print(f"  {draft.body}")
+        console.print(f"  Subject: {message['Subject']}")
+        console.print(f"  {message.get_content()}")
 
 
 def _slugify(value: str) -> str:
@@ -372,8 +375,9 @@ def send(
         False,
         "--generate",
         help=(
-            "Draft each email with AI (DeepSeek V4 Flash via NVIDIA NIM) "
-            "instead of --subject/--body. Set LINKDOGGER_AI_API_KEY in .env."
+            "Draft one professional email template with AI (DeepSeek V4 "
+            "Flash via NVIDIA NIM) and personalize it for every contact. "
+            "Set LINKDOGGER_AI_API_KEY in .env."
         ),
     ),
     view: bool = typer.Option(
@@ -410,12 +414,12 @@ def send(
     email address (…@gmail.com, …@outlook.com, …) is sent to directly.
     With --test EMAIL "TITLE" "BODY", send a single test email instead,
     to verify your SMTP setup before any real outreach. With --generate,
-    every subject and body is drafted by AI (DeepSeek V4 Flash via
-    NVIDIA NIM) instead of the --subject/--body template. With --view,
-    every message is shown for review and you are asked to confirm
-    before anything is sent. Configure the outbox with LINKDOGGER_SMTP_HOST
-    (plus username, password and from-address) in your .env. Always try
-    --dry-run first.
+    one professional template is drafted by AI (DeepSeek V4 Flash via
+    NVIDIA NIM) — a single API call per batch — and personalized for
+    every contact via placeholders. With --view, every message is shown
+    for review and you are asked to confirm before anything is sent.
+    Configure the outbox with LINKDOGGER_SMTP_HOST (plus username,
+    password and from-address) in your .env. Always try --dry-run first.
     """
     settings = get_settings()
 
@@ -475,25 +479,27 @@ def send(
                 "AI is not configured: set LINKDOGGER_AI_API_KEY in your .env "
                 "(get a free key from build.nvidia.com)"
             )
-        generator = DraftGenerator(settings)
-        drafts: list[EmailDraft] = []
+        console.print("[dim]Generating email template…[/dim]")
         try:
-            for contact in contacts:
-                console.print(f"[dim]Generating draft for {contact.email}…[/dim]")
-                drafts.append(generator.generate(contact))
+            draft = DraftGenerator(settings).generate_template()
         except AIError as exc:
             raise typer.BadParameter(str(exc)) from None
         if dry_run:
             console.print(
                 "[bold yellow]Dry run[/bold yellow] — no emails will be sent."
             )
-            _preview_drafts(contacts, drafts)
-            console.print(f"[dim]Generated {len(drafts)} draft(s).[/dim]")
+            _preview_drafts(contacts, draft, settings)
+            console.print(
+                "[dim]Placeholders {name}, {company}, {position}, {from_name} "
+                "are filled per recipient.[/dim]"
+            )
             return
         if view:
             console.print("[bold cyan]Review[/bold cyan] — nothing has been sent yet.")
-            _preview_drafts(contacts, drafts)
-            if not typer.confirm(f"Send these {len(drafts)} email(s)?", default=False):
+            _preview_drafts(contacts, draft, settings)
+            if not typer.confirm(
+                f"Send these {len(contacts)} email(s)?", default=False
+            ):
                 console.print("[dim]Aborted — nothing was sent.[/dim]")
                 return
         if not settings.smtp_host:
@@ -502,9 +508,10 @@ def send(
                 "LINKDOGGER_SMTP_USERNAME/PASSWORD/FROM) in your .env first"
             )
         try:
-            report = send_generated(
+            report = send_emails(
                 contacts,
-                [(draft.subject, draft.body) for draft in drafts],
+                subject=draft.subject,
+                body=draft.body,
                 settings=settings,
                 delay_seconds=delay,
             )

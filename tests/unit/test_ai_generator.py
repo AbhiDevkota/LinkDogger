@@ -6,7 +6,6 @@ import pytest
 from linkdogger.ai.generator import DraftGenerator, EmailDraft
 from linkdogger.config.settings import Settings
 from linkdogger.errors import AIError
-from linkdogger.mail.contacts import Contact
 
 
 class FakeResponse:
@@ -61,6 +60,11 @@ def fake_client(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("linkdogger.ai.generator.httpx.Client", FakeClient)
 
 
+@pytest.fixture(autouse=True)
+def no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("linkdogger.ai.generator.time.sleep", lambda s: None)
+
+
 def _settings(**overrides: object) -> Settings:
     return Settings(
         _env_file=None,
@@ -78,23 +82,20 @@ def _completion(content: str) -> object:
     }
 
 
-def _contact() -> Contact:
-    return Contact(
-        email="alice@example.com",
-        name="Alice",
-        company="Acme",
-        position="Engineer",
-    )
-
-
-def test_generate_returns_personalized_draft() -> None:
+def test_generate_template_returns_draft() -> None:
     FakeClient.responses.append(
         FakeResponse(
-            _completion('{"subject": "Hi Alice", "body": "Hello Alice, Acme!"}')
+            _completion(
+                '{"subject": "Quick question for {name}", '
+                '"body": "Dear {name},\\n\\nHello."}'
+            )
         )
     )
-    draft = DraftGenerator(_settings()).generate(_contact())
-    assert draft == EmailDraft(subject="Hi Alice", body="Hello Alice, Acme!")
+    draft = DraftGenerator(_settings()).generate_template()
+    assert draft == EmailDraft(
+        subject="Quick question for {name}",
+        body="Dear {name},\n\nHello.",
+    )
 
     client = FakeClient.instances[0]
     assert client.last_url == "/chat/completions"
@@ -105,50 +106,71 @@ def test_generate_returns_personalized_draft() -> None:
     assert payload["model"] == "deepseek-ai/deepseek-v4-flash"
     assert payload["temperature"] == 0.7
     user_message = payload["messages"][1]["content"]
-    assert "Alice" in user_message
-    assert "Acme" in user_message
-    assert "Engineer" in user_message
+    assert "{name}" in user_message
+    assert "{company}" in user_message
+    assert "{position}" in user_message
+    assert "{from_name}" in user_message
+    assert "professional" in user_message
 
 
-def test_generate_parses_fenced_and_prose_json() -> None:
+def test_generate_template_parses_fenced_and_prose_json() -> None:
     FakeClient.responses.append(
         FakeResponse(_completion('```json\n{"subject": "S", "body": "B"}\n```'))
     )
-    assert DraftGenerator(_settings()).generate(_contact()) == EmailDraft("S", "B")
+    assert DraftGenerator(_settings()).generate_template() == EmailDraft("S", "B")
 
     FakeClient.responses.append(
         FakeResponse(_completion('Here you go: {"subject": "S2", "body": "B2"}.'))
     )
-    assert DraftGenerator(_settings()).generate(_contact()) == EmailDraft("S2", "B2")
+    assert DraftGenerator(_settings()).generate_template() == EmailDraft("S2", "B2")
 
 
-def test_generate_requires_api_key() -> None:
+def test_generate_template_requires_api_key() -> None:
     with pytest.raises(AIError, match="AI_API_KEY"):
-        DraftGenerator(Settings(_env_file=None, ai_api_key=None)).generate(_contact())
+        DraftGenerator(Settings(_env_file=None, ai_api_key=None)).generate_template()
 
 
-def test_generate_raises_on_http_error() -> None:
+def test_generate_template_raises_on_http_error() -> None:
     FakeClient.responses.append(FakeResponse({"error": "bad key"}, status_code=401))
     with pytest.raises(AIError, match="HTTP 401"):
-        DraftGenerator(_settings()).generate(_contact())
+        DraftGenerator(_settings()).generate_template()
+    assert not FakeClient.responses  # single attempt, non-transient errors don't retry
 
 
-def test_generate_raises_on_unexpected_shape() -> None:
+def test_generate_template_retries_transient_errors_then_succeeds() -> None:
+    FakeClient.responses.append(FakeResponse({"error": "overloaded"}, status_code=529))
+    FakeClient.responses.append(FakeResponse({"error": "slow"}, status_code=503))
+    FakeClient.responses.append(
+        FakeResponse(_completion('{"subject": "S", "body": "B"}'))
+    )
+    assert DraftGenerator(_settings()).generate_template() == EmailDraft("S", "B")
+
+
+def test_generate_template_gives_up_after_retries() -> None:
+    for _ in range(3):
+        FakeClient.responses.append(
+            FakeResponse({"error": "overloaded"}, status_code=529)
+        )
+    with pytest.raises(AIError, match="after 3 attempts"):
+        DraftGenerator(_settings()).generate_template()
+
+
+def test_generate_template_raises_on_unexpected_shape() -> None:
     FakeClient.responses.append(FakeResponse({"unexpected": True}))
     with pytest.raises(AIError, match="unexpected response shape"):
-        DraftGenerator(_settings()).generate(_contact())
+        DraftGenerator(_settings()).generate_template()
 
 
-def test_generate_raises_on_non_json_content() -> None:
+def test_generate_template_raises_on_non_json_content() -> None:
     FakeClient.responses.append(FakeResponse(_completion("Sorry, I cannot do that.")))
     with pytest.raises(AIError, match="did not contain"):
-        DraftGenerator(_settings()).generate(_contact())
+        DraftGenerator(_settings()).generate_template()
 
 
-def test_generate_raises_on_missing_fields() -> None:
+def test_generate_template_raises_on_missing_fields() -> None:
     FakeClient.responses.append(FakeResponse(_completion('{"subject": "only"}')))
     with pytest.raises(AIError, match="missing 'subject' or 'body'"):
-        DraftGenerator(_settings()).generate(_contact())
+        DraftGenerator(_settings()).generate_template()
 
 
 def test_check_reports_model_count() -> None:
