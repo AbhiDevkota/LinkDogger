@@ -1,6 +1,6 @@
 """Email sending (SMTP outbox) and reply watching (IMAP observer)."""
 
-from linkdogger.mail.contacts import Contact, load_contacts
+from linkdogger.mail.contacts import Contact, load_contacts, validate_email
 from linkdogger.mail.observer import (
     ReplyObserver,
     ReplyRecord,
@@ -14,6 +14,7 @@ from linkdogger.mail.sender import (
     build_message,
     send_emails,
     send_emails_from_file,
+    send_test_email,
 )
 
 __all__ = [
@@ -29,4 +30,6 @@ __all__ = [
     "observe_replies",
     "send_emails",
     "send_emails_from_file",
+    "send_test_email",
+    "validate_email",
 ]

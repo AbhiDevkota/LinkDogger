@@ -7,12 +7,13 @@ import pytest
 
 from linkdogger.config.settings import Settings
 from linkdogger.errors import MailError
-from linkdogger.mail.contacts import Contact, load_contacts
+from linkdogger.mail.contacts import Contact, load_contacts, validate_email
 from linkdogger.mail.sender import (
     DEFAULT_BODY,
     DEFAULT_SUBJECT,
     build_message,
     send_emails,
+    send_test_email,
 )
 
 
@@ -231,3 +232,37 @@ def test_defaults_render_all_placeholders() -> None:
     )
     assert "{name}" not in message["Subject"]
     assert "{name}" not in message.get_content()
+
+
+def test_validate_email_normalizes_and_rejects() -> None:
+    assert validate_email("  Alice@Example.COM ") == "alice@example.com"
+    assert validate_email("not-an-email") is None
+    assert validate_email("a@b@c.com") is None
+    assert validate_email("x@y.com\r\nBcc: z@y.com") is None
+
+
+def test_send_test_email_delivers_single_message() -> None:
+    report = send_test_email(
+        "me@example.com",
+        "Test title",
+        "Test body",
+        settings=_settings(),
+    )
+    assert report.total == 1
+    assert report.sent == ["me@example.com"]
+    smtp = FakeSMTP.instances[0]
+    assert len(smtp.messages) == 1
+    assert smtp.messages[0]["Subject"] == "Test title"
+    assert "Test body" in smtp.messages[0].get_content()
+
+
+def test_send_test_email_dry_run_never_connects() -> None:
+    report = send_test_email(
+        "me@example.com",
+        "Test title",
+        "Test body",
+        settings=_settings(),
+        dry_run=True,
+    )
+    assert report.sent == ["me@example.com"]
+    assert not FakeSMTP.instances

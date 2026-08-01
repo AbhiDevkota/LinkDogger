@@ -241,6 +241,53 @@ def test_send_without_smtp_configuration_errors(tmp_path, monkeypatch) -> None:
     assert "SMTP is not configured" in result.output
 
 
+def test_send_test_email_dry_run_requires_no_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    result = runner.invoke(
+        app,
+        [
+            "send",
+            "--test",
+            "me@example.com",
+            "My title",
+            "My body",
+            "--dry-run",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "test email to me@example.com" in result.output
+    assert "My title" in result.output
+
+
+def test_send_test_email_rejects_invalid_address(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    result = runner.invoke(
+        app,
+        ["send", "--test", "not-an-email", "T", "B", "--dry-run"],
+    )
+    assert result.exit_code != 0
+    assert "not a valid email address" in result.output
+
+
+def test_send_test_email_without_smtp_configuration_errors(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    result = runner.invoke(
+        app,
+        ["send", "--test", "me@example.com", "T", "B"],
+    )
+    assert result.exit_code != 0
+    assert "SMTP is not configured" in result.output
+
+
+def test_send_without_file_and_without_test_errors(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    result = runner.invoke(app, ["send"])
+    assert result.exit_code != 0
+    assert "--test" in result.output
+
+
 def test_watch_once_reports_replies(tmp_path, monkeypatch) -> None:
     import email as email_module
 

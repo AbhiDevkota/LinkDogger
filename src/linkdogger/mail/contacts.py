@@ -73,7 +73,7 @@ def load_contacts(path: Path) -> list[Contact]:
     contacts: list[Contact] = []
     seen: set[str] = set()
     for raw_email, meta in entries:
-        email = _validate_email(raw_email)
+        email = validate_email(raw_email)
         if not email or email in seen:
             continue
         seen.add(email)
@@ -90,7 +90,8 @@ def load_contacts(path: Path) -> list[Contact]:
     return contacts
 
 
-def _validate_email(value: object) -> str | None:
+def validate_email(value: object) -> str | None:
+    """Return the normalized address if ``value`` is a valid email, else None."""
     if not isinstance(value, str):
         return None
     email = value.strip()

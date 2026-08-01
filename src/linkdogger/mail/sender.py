@@ -176,3 +176,21 @@ def send_emails_from_file(
         dry_run=dry_run,
         delay_seconds=delay_seconds,
     )
+
+
+def send_test_email(
+    recipient: str,
+    subject: str,
+    body: str,
+    settings: Settings | None = None,
+    dry_run: bool = False,
+) -> SendReport:
+    """Send one test email to ``recipient`` to verify the SMTP setup."""
+    return send_emails(
+        [Contact(email=recipient)],
+        subject=subject,
+        body=body,
+        settings=settings,
+        dry_run=dry_run,
+        delay_seconds=0,
+    )

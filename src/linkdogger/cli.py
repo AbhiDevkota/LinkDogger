@@ -14,9 +14,14 @@ from linkdogger.config.settings import get_settings
 from linkdogger.errors import IPCError, MailError, SourceUnavailableError
 from linkdogger.ipc import IPCClient, IPCServer
 from linkdogger.linkedin_api import get_linkedin_client, validate_session
-from linkdogger.mail.contacts import load_contacts
+from linkdogger.mail.contacts import load_contacts, validate_email
 from linkdogger.mail.observer import ReplyObserver, build_reply_report
-from linkdogger.mail.sender import DEFAULT_BODY, DEFAULT_SUBJECT, send_emails_from_file
+from linkdogger.mail.sender import (
+    DEFAULT_BODY,
+    DEFAULT_SUBJECT,
+    send_emails_from_file,
+    send_test_email,
+)
 from linkdogger.mcp_server import serve as mcp_serve
 from linkdogger.output.export import export_emails, export_result
 from linkdogger.output.json import render_json
@@ -337,8 +342,10 @@ def mcp() -> None:
 
 @app.command()
 def send(
-    file: Path = typer.Argument(  # noqa: B008 - typer.Argument default, consistent with sibling options
-        ..., help="Exported contacts file (e.g. from --export email)."
+    file: Path | None = typer.Argument(  # noqa: B008 - typer.Argument default, consistent with sibling options
+        None,
+        help="Exported contacts file (e.g. from --export email); "
+        "not needed with --test.",
     ),
     subject: str | None = typer.Option(
         None,
@@ -351,6 +358,16 @@ def send(
     body_file: Path | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
         None, "--body-file", help="Read the body template from a UTF-8 text file."
     ),
+    test: tuple[str, str, str] | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        None,
+        "--test",
+        metavar="EMAIL TITLE BODY",
+        help=(
+            "Send one test email to EMAIL with the given title and body — "
+            'e.g. --test you@gmail.com "My title" "My body". '
+            "No contacts file is needed."
+        ),
+    ),
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -362,10 +379,53 @@ def send(
 ) -> None:
     """Send personalized emails to every address in an exported contacts file.
 
-    Configure the outbox with LINKDOGGER_SMTP_HOST (plus username,
-    password and from-address) in your .env. Always try --dry-run first.
+    With --test EMAIL "TITLE" "BODY", send a single test email instead,
+    to verify your SMTP setup before any real outreach. Configure the
+    outbox with LINKDOGGER_SMTP_HOST (plus username, password and
+    from-address) in your .env. Always try --dry-run first.
     """
     settings = get_settings()
+
+    if test is not None:
+        recipient, title, test_body = test
+        address = validate_email(recipient)
+        if address is None:
+            raise typer.BadParameter(f"'{recipient}' is not a valid email address")
+        if file is not None:
+            console.print("[dim]Ignoring contacts file in --test mode.[/dim]")
+        if dry_run:
+            console.print(
+                "[bold yellow]Dry run[/bold yellow] — no emails will be sent."
+            )
+        elif not settings.smtp_host:
+            raise typer.BadParameter(
+                "SMTP is not configured: set LINKDOGGER_SMTP_HOST (and "
+                "LINKDOGGER_SMTP_USERNAME/PASSWORD/FROM) in your .env first"
+            )
+        try:
+            report = send_test_email(
+                address,
+                title,
+                test_body,
+                settings=settings,
+                dry_run=dry_run,
+            )
+        except MailError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        console.print(
+            f"[bold cyan]LinkDogger[/bold cyan] "
+            f"{'previewed' if dry_run else 'sent'} test email to {address}"
+        )
+        console.print(f"  Subject: {title}")
+        if not dry_run and report.failed:
+            console.print(f"[red]Failed[/red] {report.failed[0][1]}")
+        console.print("[dim]Check the inbox and spam folder to confirm delivery.[/dim]")
+        return
+
+    if file is None:
+        raise typer.BadParameter(
+            "missing contacts file argument (or use --test EMAIL TITLE BODY)"
+        )
     if body_file is not None:
         try:
             body = body_file.read_text(encoding="utf-8")
