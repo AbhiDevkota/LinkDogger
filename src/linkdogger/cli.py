@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 from pathlib import Path
 
 import typer
@@ -11,7 +12,7 @@ from linkdogger import __version__
 from linkdogger.config.settings import get_settings
 from linkdogger.errors import SourceUnavailableError
 from linkdogger.linkedin_api import get_linkedin_client, validate_session
-from linkdogger.output.export import export_result
+from linkdogger.output.export import export_emails, export_result
 from linkdogger.output.json import render_json
 from linkdogger.output.table import render_table
 from linkdogger.services.factory import build_people_service
@@ -46,6 +47,12 @@ def _print_warnings(result: object) -> None:
     if warnings:
         for warning in warnings:
             console.print(f"[yellow]Warning:[/yellow] {warning}")
+
+
+def _slugify(value: str) -> str:
+    """Turn a company/query name into a safe filename stem."""
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or "results"
 
 
 def _run_web() -> None:
@@ -133,8 +140,13 @@ def search(
         "--hybrid",
         help="Use GitHub and LinkedIn together (shortcut for --provider hybrid).",
     ),
-    export: Path | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
-        None, "--export", help="Write results to a file (.json, .csv or .md)."
+    export: str | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        None,
+        "--export",
+        help=(
+            "Write results to a file (.json, .csv or .md), or 'email' to "
+            "export every found email address to a JSON file."
+        ),
     ),
 ) -> None:
     """Discover publicly discoverable people associated with COMPANY."""
@@ -175,10 +187,15 @@ def search(
             )
 
     if export is not None:
-        try:
-            message = export_result(result, export)
-        except ValueError as exc:
-            raise typer.BadParameter(str(exc)) from None
+        if export == "email":
+            slug = _slugify(result.company.name if result.company else result.query)
+            message = export_emails(result, Path(f"{slug}.emails.json"))
+        else:
+            target = Path(export)
+            try:
+                message = export_result(result, target)
+            except ValueError as exc:
+                raise typer.BadParameter(str(exc)) from None
         console.print(f"[green]{message}[/green]")
 
     if json_output:

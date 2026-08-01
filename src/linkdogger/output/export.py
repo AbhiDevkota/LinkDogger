@@ -2,12 +2,15 @@
 
 The JSON export is the canonical, versioned machine-readable format;
 CSV and Markdown are flattened views for humans and spreadsheets.
+``export_emails`` writes just the discovered email addresses, which is
+the handiest artifact for outreach lists.
 """
 
 from __future__ import annotations
 
 import csv
 import io
+import json
 from pathlib import Path
 
 from linkdogger.models.person import PersonProfile
@@ -17,6 +20,8 @@ from linkdogger.output.json import render_json
 JSON_SUFFIXES = (".json",)
 CSV_SUFFIXES = (".csv",)
 MARKDOWN_SUFFIXES = (".md", ".markdown")
+
+EMAIL_SCHEMA_VERSION = "1.0"
 
 _CSV_COLUMNS = [
     "name",
@@ -55,6 +60,39 @@ def export_result(result: SearchResult, path: Path) -> str:
     raise ValueError(
         f"unsupported export format '{suffix}' (expected .json, .csv or .md)"
     )
+
+
+def export_emails(result: SearchResult, path: Path) -> str:
+    """Write every discovered email address to ``path`` as JSON.
+
+    Only people with an email address are included; the document lists
+    them twice — a flat ``emails`` array for pasting into tools, and
+    ``people`` with name/position context. Returns a short description
+    of what was exported.
+    """
+    people = [
+        {
+            "name": person.name,
+            "company": person.company,
+            "position": person.position,
+            "email": person.email,
+        }
+        for person in result.results
+        if person.email
+    ]
+    payload = {
+        "schema_version": EMAIL_SCHEMA_VERSION,
+        "query": result.query,
+        "company": result.company.name if result.company else None,
+        "generated_at": result.generated_at.isoformat(),
+        "count": len(people),
+        "emails": [entry["email"] for entry in people],
+        "people": people,
+    }
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    return f"Exported {len(people)} email(s) to {path} (JSON)"
 
 
 def render_csv(result: SearchResult) -> str:

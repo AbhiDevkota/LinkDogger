@@ -63,6 +63,40 @@ def test_search_shows_results() -> None:
     assert "Alex Sample" in result.output
 
 
+def test_search_export_email_writes_emails_file(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env, control file location
+    result = runner.invoke(
+        app, ["search", "Acme", "--provider", "mock", "--export", "email"]
+    )
+    assert result.exit_code == 0
+    assert "2 email(s) to acme-corporation.emails.json" in result.output
+    payload = json.loads(
+        (tmp_path / "acme-corporation.emails.json").read_text(encoding="utf-8")
+    )
+    assert payload["schema_version"] == "1.0"
+    assert payload["query"] == "Acme"
+    assert payload["company"] == "Acme Corporation"
+    assert payload["count"] == 2
+    assert "alex.sample@example.com" in payload["emails"]
+    assert "taylor.sample@example.com" in payload["emails"]
+
+
+def test_search_export_email_unknown_company_still_writes_file(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env, control file location
+    result = runner.invoke(
+        app,
+        ["search", "Nonexistent Company", "--provider", "mock", "--export", "email"],
+    )
+    assert result.exit_code == 1
+    payload = json.loads(
+        (tmp_path / "nonexistent-company.emails.json").read_text(encoding="utf-8")
+    )
+    assert payload["count"] == 0
+    assert payload["emails"] == []
+
+
 def test_search_unknown_company_reports_not_found() -> None:
     result = runner.invoke(app, ["search", "Nonexistent Company", "--provider", "mock"])
     assert result.exit_code == 1

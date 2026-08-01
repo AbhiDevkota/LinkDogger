@@ -12,7 +12,13 @@ from linkdogger.models.networking import NetworkingScore
 from linkdogger.models.person import PersonProfile
 from linkdogger.models.search import SearchResult
 from linkdogger.models.social import SocialProfile
-from linkdogger.output.export import export_result, render_csv, render_markdown
+from linkdogger.output.export import (
+    EMAIL_SCHEMA_VERSION,
+    export_emails,
+    export_result,
+    render_csv,
+    render_markdown,
+)
 from linkdogger.output.json import render_json
 
 
@@ -142,3 +148,56 @@ def test_render_markdown_escapes_pipes() -> None:
         results=[PersonProfile(name="A|B", company="Acme")],
     )
     assert "A\\|B" in render_markdown(result)
+
+
+def test_export_emails_writes_flat_list_and_people(tmp_path: Path) -> None:
+    result = SearchResult(
+        query="acme",
+        company=None,
+        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        count=2,
+        results=[
+            PersonProfile(
+                name="Alice Example",
+                company="Acme Corporation",
+                position="Engineer",
+                email="alice@example.com",
+            ),
+            PersonProfile(
+                name="No Email",
+                company="Acme Corporation",
+                position="Designer",
+            ),
+        ],
+    )
+    path = tmp_path / "emails.json"
+    message = export_emails(result, path)
+    assert "1 email(s)" in message
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["schema_version"] == EMAIL_SCHEMA_VERSION
+    assert payload["query"] == "acme"
+    assert payload["count"] == 1
+    assert payload["emails"] == ["alice@example.com"]
+    assert payload["people"] == [
+        {
+            "name": "Alice Example",
+            "company": "Acme Corporation",
+            "position": "Engineer",
+            "email": "alice@example.com",
+        }
+    ]
+
+
+def test_export_emails_with_no_emails_writes_empty_file(tmp_path: Path) -> None:
+    result = SearchResult(
+        query="acme",
+        generated_at=datetime(2026, 1, 1, tzinfo=UTC),
+        count=1,
+        results=[PersonProfile(name="No Email", company="Acme")],
+    )
+    path = tmp_path / "emails.json"
+    export_emails(result, path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["count"] == 0
+    assert payload["emails"] == []
+    assert payload["people"] == []

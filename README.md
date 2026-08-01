@@ -240,7 +240,15 @@ the best profiles to engage with appear first.
 linkdogger search "OpenAI" --export results.json
 linkdogger search "OpenAI" --export results.csv
 linkdogger search "OpenAI" --export results.md
+
+# Outreach lists: dump every discovered email address to a JSON file
+# (auto-named from the resolved company, e.g. openai.emails.json)
+linkdogger search "OpenAI" --export email
 ```
+
+The `--export email` variant writes a JSON document with a flat `emails`
+array (for pasting into mailing tools) plus `people` entries carrying
+name/position context. Only people with a discovered email are included.
 
 ### Web dashboard
 
