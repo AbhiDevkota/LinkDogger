@@ -1,0 +1,22 @@
+"""Email sending (SMTP outbox) and reply watching (IMAP observer)."""
+
+from linkdogger.mail.contacts import Contact, load_contacts
+from linkdogger.mail.sender import (
+    DEFAULT_BODY,
+    DEFAULT_SUBJECT,
+    SendReport,
+    build_message,
+    send_emails,
+    send_emails_from_file,
+)
+
+__all__ = [
+    "Contact",
+    "DEFAULT_BODY",
+    "DEFAULT_SUBJECT",
+    "SendReport",
+    "build_message",
+    "load_contacts",
+    "send_emails",
+    "send_emails_from_file",
+]

@@ -11,9 +11,10 @@ from rich.console import Console
 
 from linkdogger import __version__
 from linkdogger.config.settings import get_settings
-from linkdogger.errors import IPCError, SourceUnavailableError
+from linkdogger.errors import IPCError, MailError, SourceUnavailableError
 from linkdogger.ipc import IPCClient, IPCServer
 from linkdogger.linkedin_api import get_linkedin_client, validate_session
+from linkdogger.mail.sender import DEFAULT_BODY, DEFAULT_SUBJECT, send_emails_from_file
 from linkdogger.mcp_server import serve as mcp_serve
 from linkdogger.output.export import export_emails, export_result
 from linkdogger.output.json import render_json
@@ -330,6 +331,80 @@ def mcp() -> None:
     )
     code = mcp_serve(_build_people_service(), backend=settings.discovery_backend)
     raise typer.Exit(code)
+
+
+@app.command()
+def send(
+    file: Path = typer.Argument(  # noqa: B008 - typer.Argument default, consistent with sibling options
+        ..., help="Exported contacts file (e.g. from --export email)."
+    ),
+    subject: str | None = typer.Option(
+        None,
+        "--subject",
+        help="Subject template; placeholders: {name}, {company}, {position}.",
+    ),
+    body: str | None = typer.Option(
+        None, "--body", help="Body template (see --subject for placeholders)."
+    ),
+    body_file: Path | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        None, "--body-file", help="Read the body template from a UTF-8 text file."
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Build and preview every message without connecting to SMTP.",
+    ),
+    delay: float = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        1.0, "--delay", help="Seconds to wait between sends (0 to disable)."
+    ),
+) -> None:
+    """Send personalized emails to every address in an exported contacts file.
+
+    Configure the outbox with LINKDOGGER_SMTP_HOST (plus username,
+    password and from-address) in your .env. Always try --dry-run first.
+    """
+    settings = get_settings()
+    if body_file is not None:
+        try:
+            body = body_file.read_text(encoding="utf-8")
+        except OSError as exc:
+            raise typer.BadParameter(f"could not read body file: {exc}") from None
+    subject = subject if subject is not None else DEFAULT_SUBJECT
+    body = body if body is not None else DEFAULT_BODY
+
+    if dry_run:
+        console.print("[bold yellow]Dry run[/bold yellow] — no emails will be sent.")
+    elif not settings.smtp_host:
+        raise typer.BadParameter(
+            "SMTP is not configured: set LINKDOGGER_SMTP_HOST (and "
+            "LINKDOGGER_SMTP_USERNAME/PASSWORD/FROM) in your .env first"
+        )
+
+    try:
+        report = send_emails_from_file(
+            str(file),
+            subject=subject,
+            body=body,
+            settings=settings,
+            dry_run=dry_run,
+            delay_seconds=delay,
+        )
+    except MailError as exc:
+        raise typer.BadParameter(str(exc)) from None
+
+    verb = "Previewed" if dry_run else "Sent"
+    console.print(
+        f"[bold cyan]LinkDogger[/bold cyan] {verb.lower()} {len(report.sent)} "
+        f"of {report.total} emails"
+    )
+    if not dry_run:
+        if report.sent:
+            console.print("[green]Delivered to:[/green] " + ", ".join(report.sent))
+        for email, error in report.failed:
+            console.print(f"[red]Failed[/red] {email}: {error}")
+    console.print(
+        "[dim]Use --dry-run to preview messages before sending for real.[/dim]"
+    )
 
 
 def _linkedin_login() -> None:
