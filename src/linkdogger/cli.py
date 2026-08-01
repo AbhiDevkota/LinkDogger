@@ -14,6 +14,8 @@ from linkdogger.config.settings import get_settings
 from linkdogger.errors import IPCError, MailError, SourceUnavailableError
 from linkdogger.ipc import IPCClient, IPCServer
 from linkdogger.linkedin_api import get_linkedin_client, validate_session
+from linkdogger.mail.contacts import load_contacts
+from linkdogger.mail.observer import ReplyObserver, build_reply_report
 from linkdogger.mail.sender import DEFAULT_BODY, DEFAULT_SUBJECT, send_emails_from_file
 from linkdogger.mcp_server import serve as mcp_serve
 from linkdogger.output.export import export_emails, export_result
@@ -405,6 +407,88 @@ def send(
     console.print(
         "[dim]Use --dry-run to preview messages before sending for real.[/dim]"
     )
+
+
+@app.command()
+def watch(
+    file: Path = typer.Argument(  # noqa: B008 - typer.Argument default, consistent with sibling options
+        ..., help="Exported contacts file whose replies should be watched."
+    ),
+    once: bool = typer.Option(
+        False,
+        "--once",
+        help="Scan the inbox a single time and exit (for scripts/CI).",
+    ),
+    interval: float = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        60.0, "--interval", help="Seconds between scans when not using --once."
+    ),
+    since_days: int | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        7, "--since-days", help="Only scan messages newer than N days (0 = all)."
+    ),
+    report: Path | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
+        None,
+        "--report",
+        help="Write the reply findings to this JSON file on every scan.",
+    ),
+) -> None:
+    """Watch the inbox for replies from contacts in an exported file.
+
+    Configure the inbox with LINKDOGGER_IMAP_HOST (plus username,
+    password) in your .env. The observer reports who replied, when,
+    and a preview of what they said.
+    """
+    settings = get_settings()
+    if not settings.imap_host:
+        raise typer.BadParameter(
+            "IMAP is not configured: set LINKDOGGER_IMAP_HOST (and "
+            "LINKDOGGER_IMAP_USERNAME/PASSWORD) in your .env first"
+        )
+    try:
+        contacts = load_contacts(file)
+    except MailError as exc:
+        raise typer.BadParameter(str(exc)) from None
+
+    observer = ReplyObserver(settings)
+    seen: set[str] = set()
+
+    def scan() -> list:
+        replies = observer.scan(contacts, since_days=since_days or None)
+        fresh = [reply for reply in replies if reply.uid not in seen]
+        seen.update(reply.uid for reply in replies)
+        return fresh
+
+    try:
+        while True:
+            fresh = scan()
+            if fresh:
+                for reply in fresh:
+                    console.print(f"[green]Reply from {reply.sender}[/green]")
+                    console.print(f"  Subject: {reply.subject}")
+                    if reply.date:
+                        console.print(f"  Date:    {reply.date}")
+                    console.print(f"  {reply.preview}")
+                    console.print()
+                console.print(f"[bold]{len(fresh)} new reply/replies found[/bold]")
+            else:
+                console.print("[dim]No replies yet from the watched contacts.[/dim]")
+            if report is not None:
+                try:
+                    report.write_text(
+                        json.dumps(
+                            build_reply_report(observer.scan(contacts), contacts),
+                            indent=2,
+                            ensure_ascii=False,
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                except OSError as exc:
+                    raise typer.BadParameter(f"could not write report: {exc}") from None
+            if once:
+                break
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        console.print("\n[dim]Watch stopped.[/dim]")
 
 
 def _linkedin_login() -> None:
