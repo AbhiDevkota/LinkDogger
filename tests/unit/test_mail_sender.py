@@ -13,6 +13,7 @@ from linkdogger.mail.sender import (
     DEFAULT_SUBJECT,
     build_message,
     send_emails,
+    send_generated,
     send_test_email,
 )
 
@@ -265,4 +266,26 @@ def test_send_test_email_dry_run_never_connects() -> None:
         dry_run=True,
     )
     assert report.sent == ["me@example.com"]
+    assert not FakeSMTP.instances
+
+
+def test_send_generated_delivers_per_contact_drafts() -> None:
+    drafts = [("For Alice", "Body A"), ("For Bob", "Body B")]
+    report = send_generated(_contacts(), drafts, settings=_settings())
+    assert report.total == 2
+    assert report.sent == ["alice@example.com", "bob@example.com"]
+    smtp = FakeSMTP.instances[0]
+    assert [m["Subject"] for m in smtp.messages] == ["For Alice", "For Bob"]
+    assert "Body B" in smtp.messages[1].get_content()
+
+
+def test_send_generated_requires_matching_drafts() -> None:
+    with pytest.raises(MailError, match="drafts"):
+        send_generated(_contacts(), [("only", "one")], settings=_settings())
+
+
+def test_send_generated_dry_run_builds_without_connecting() -> None:
+    drafts = [("For Alice", "Body A"), ("For Bob", "Body B")]
+    report = send_generated(_contacts(), drafts, settings=_settings(), dry_run=True)
+    assert report.sent == ["alice@example.com", "bob@example.com"]
     assert not FakeSMTP.instances

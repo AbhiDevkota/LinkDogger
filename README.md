@@ -305,6 +305,28 @@ Templates support the placeholders `{name}`, `{company}`, `{position}` and
 (default 1s) to behave politely with recipient servers. Delivery failures
 are isolated per recipient — one bad address never aborts the batch.
 
+### AI-generated outreach — `send --generate`
+
+Let an LLM draft every subject and body for you, personalized per contact,
+through NVIDIA NIM (build.nvidia.com) with DeepSeek V4 Flash:
+
+```bash
+# 1. Get a free API key from https://build.nvidia.com and set it in .env
+#    LINKDOGGER_AI_API_KEY=nvapi-...
+
+# 2. Preview what the model wrote (no emails sent)
+linkdogger send openai.emails.json --generate --dry-run
+
+# 3. Send the generated drafts for real
+linkdogger send openai.emails.json --generate
+```
+
+Each contact gets its own draft generated from their name, company and
+position (plus your `LINKDOGGER_SMTP_FROM_NAME`). Point the generator at
+any OpenAI-compatible endpoint with `LINKDOGGER_AI_BASE_URL` /
+`LINKDOGGER_AI_MODEL`. Drafts are 2-4 sentence, low-pressure outreach
+messages; always review a `--dry-run` before sending.
+
 ### Watch — observe replies and inform yourself
 
 ```bash

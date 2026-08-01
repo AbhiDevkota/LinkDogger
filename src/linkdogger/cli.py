@@ -10,8 +10,9 @@ import typer
 from rich.console import Console
 
 from linkdogger import __version__
+from linkdogger.ai.generator import DraftGenerator, EmailDraft
 from linkdogger.config.settings import get_settings
-from linkdogger.errors import IPCError, MailError, SourceUnavailableError
+from linkdogger.errors import AIError, IPCError, MailError, SourceUnavailableError
 from linkdogger.ipc import IPCClient, IPCServer
 from linkdogger.linkedin_api import get_linkedin_client, validate_session
 from linkdogger.mail.contacts import load_contacts, validate_email
@@ -20,6 +21,7 @@ from linkdogger.mail.sender import (
     DEFAULT_BODY,
     DEFAULT_SUBJECT,
     send_emails_from_file,
+    send_generated,
     send_test_email,
 )
 from linkdogger.mcp_server import serve as mcp_serve
@@ -358,6 +360,14 @@ def send(
     body_file: Path | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
         None, "--body-file", help="Read the body template from a UTF-8 text file."
     ),
+    generate: bool = typer.Option(
+        False,
+        "--generate",
+        help=(
+            "Draft each email with AI (DeepSeek V4 Flash via NVIDIA NIM) "
+            "instead of --subject/--body. Set LINKDOGGER_AI_API_KEY in .env."
+        ),
+    ),
     test: tuple[str, str, str] | None = typer.Option(  # noqa: B008 - typer.Option default, consistent with sibling options
         None,
         "--test",
@@ -380,7 +390,9 @@ def send(
     """Send personalized emails to every address in an exported contacts file.
 
     With --test EMAIL "TITLE" "BODY", send a single test email instead,
-    to verify your SMTP setup before any real outreach. Configure the
+    to verify your SMTP setup before any real outreach. With --generate,
+    every subject and body is drafted by AI (DeepSeek V4 Flash via
+    NVIDIA NIM) instead of the --subject/--body template. Configure the
     outbox with LINKDOGGER_SMTP_HOST (plus username, password and
     from-address) in your .env. Always try --dry-run first.
     """
@@ -426,6 +438,59 @@ def send(
         raise typer.BadParameter(
             "missing contacts file argument (or use --test EMAIL TITLE BODY)"
         )
+
+    if generate:
+        if not settings.ai_api_key:
+            raise typer.BadParameter(
+                "AI is not configured: set LINKDOGGER_AI_API_KEY in your .env "
+                "(get a free key from build.nvidia.com)"
+            )
+        try:
+            contacts = load_contacts(file)
+        except MailError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        generator = DraftGenerator(settings)
+        drafts: list[EmailDraft] = []
+        try:
+            for contact in contacts:
+                console.print(f"[dim]Generating draft for {contact.email}…[/dim]")
+                drafts.append(generator.generate(contact))
+        except AIError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        if dry_run:
+            console.print(
+                "[bold yellow]Dry run[/bold yellow] — no emails will be sent."
+            )
+            for contact, draft in zip(contacts, drafts, strict=True):
+                console.print(f"[bold]{contact.email}[/bold]")
+                console.print(f"  Subject: {draft.subject}")
+                console.print(f"  {draft.body}")
+            console.print(f"[dim]Generated {len(drafts)} draft(s).[/dim]")
+            return
+        if not settings.smtp_host:
+            raise typer.BadParameter(
+                "SMTP is not configured: set LINKDOGGER_SMTP_HOST (and "
+                "LINKDOGGER_SMTP_USERNAME/PASSWORD/FROM) in your .env first"
+            )
+        try:
+            report = send_generated(
+                contacts,
+                [(draft.subject, draft.body) for draft in drafts],
+                settings=settings,
+                delay_seconds=delay,
+            )
+        except MailError as exc:
+            raise typer.BadParameter(str(exc)) from None
+        console.print(
+            f"[bold cyan]LinkDogger[/bold cyan] sent {len(report.sent)} "
+            f"of {report.total} emails"
+        )
+        if report.sent:
+            console.print("[green]Delivered to:[/green] " + ", ".join(report.sent))
+        for email, error in report.failed:
+            console.print(f"[red]Failed[/red] {email}: {error}")
+        return
+
     if body_file is not None:
         try:
             body = body_file.read_text(encoding="utf-8")
@@ -668,6 +733,9 @@ def config() -> None:
         ("LINKDOGGER_IMAP_USERNAME", settings.imap_username or "(not set)"),
         ("LINKDOGGER_IMAP_PASSWORD", _redact(settings.imap_password)),
         ("LINKDOGGER_IMAP_FOLDER", settings.imap_folder),
+        ("LINKDOGGER_AI_API_KEY", _redact(settings.ai_api_key)),
+        ("LINKDOGGER_AI_MODEL", settings.ai_model),
+        ("LINKDOGGER_AI_BASE_URL", settings.ai_base_url),
     ]
     for name, value in fields:
         console.print(f"  [bold]{name}[/bold] = {value}")
@@ -753,4 +821,13 @@ def doctor() -> None:
         console.print(
             "  imap  [yellow]not configured[/yellow] (set LINKDOGGER_IMAP_HOST "
             "for `linkdogger watch`)"
+        )
+    console.print()
+    console.print("[bold]AI generation[/bold]")
+    if settings.ai_api_key:
+        console.print(f"  ai    configured (model: {settings.ai_model})")
+    else:
+        console.print(
+            "  ai    [yellow]not configured[/yellow] (set "
+            "LINKDOGGER_AI_API_KEY for `linkdogger send --generate`)"
         )

@@ -66,7 +66,35 @@ def send_emails(
     collected in the report.
     """
     settings = settings or Settings()
-    report = SendReport(total=len(contacts), dry_run=dry_run)
+    recipients = [(contact, subject, body) for contact in contacts]
+    return _send(recipients, settings, dry_run, delay_seconds)
+
+
+def send_generated(
+    contacts: list[Contact],
+    drafts: list[tuple[str, str]],
+    settings: Settings | None = None,
+    dry_run: bool = False,
+    delay_seconds: float = 1.0,
+) -> SendReport:
+    """Send one email per contact using generated (subject, body) pairs."""
+    settings = settings or Settings()
+    if len(drafts) != len(contacts):
+        raise MailError(f"got {len(drafts)} drafts for {len(contacts)} contacts")
+    recipients = [
+        (contact, subject, body)
+        for contact, (subject, body) in zip(contacts, drafts, strict=True)
+    ]
+    return _send(recipients, settings, dry_run, delay_seconds)
+
+
+def _send(
+    recipients: list[tuple[Contact, str, str]],
+    settings: Settings,
+    dry_run: bool,
+    delay_seconds: float,
+) -> SendReport:
+    report = SendReport(total=len(recipients), dry_run=dry_run)
 
     if not dry_run:
         _require(settings.smtp_host, "LINKDOGGER_SMTP_HOST is not set")
@@ -75,7 +103,7 @@ def send_emails(
     try:
         if not dry_run:
             smtp = _connect(settings)
-        for contact in contacts:
+        for contact, subject, body in recipients:
             message = build_message(contact, subject, body, settings)
             if dry_run:
                 logger.info("dry-run message for %s", contact.email)

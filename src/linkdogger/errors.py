@@ -45,3 +45,7 @@ class IPCError(LinkDoggerError):
 
 class MailError(LinkDoggerError):
     """Email sending or mailbox watching failed."""
+
+
+class AIError(LinkDoggerError):
+    """AI draft generation failed (API, network, or malformed response)."""

@@ -5,6 +5,7 @@ import json
 from typer.testing import CliRunner
 
 from linkdogger import __version__
+from linkdogger.ai.generator import EmailDraft
 from linkdogger.cli import app
 
 runner = CliRunner()
@@ -326,3 +327,73 @@ def test_watch_once_reports_replies(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert "Reply from alice@example.com" in result.output
     assert "Re: hello" in result.output
+
+
+def test_send_generate_dry_run_previews_drafts(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    monkeypatch.setenv("LINKDOGGER_AI_API_KEY", "nvapi-test")
+    _write_contacts_file(tmp_path / "emails.json")
+
+    class FakeGen:
+        def generate(self, contact):
+            return EmailDraft(f"Hi {contact.name}", "Generated body.")
+
+    monkeypatch.setattr("linkdogger.cli.DraftGenerator", lambda settings: FakeGen())
+    result = runner.invoke(
+        app, ["send", "emails.json", "--generate", "--dry-run", "--delay", "0"]
+    )
+    assert result.exit_code == 0
+    assert "Dry run" in result.output
+    assert "Generating draft for alice@example.com" in result.output
+    assert "Hi Alice" in result.output
+    assert "Generated body." in result.output
+    assert "Generated 2 draft(s)" in result.output
+
+
+def test_send_generate_without_api_key_errors(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    _write_contacts_file(tmp_path / "emails.json")
+    result = runner.invoke(app, ["send", "emails.json", "--generate", "--dry-run"])
+    assert result.exit_code != 0
+    assert "LINKDOGGER_AI_API_KEY" in result.output
+
+
+def test_send_generate_sends_via_smtp(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)  # isolate from a local .env
+    monkeypatch.setenv("LINKDOGGER_AI_API_KEY", "nvapi-test")
+    monkeypatch.setenv("LINKDOGGER_SMTP_HOST", "smtp.example.com")
+    monkeypatch.setenv("LINKDOGGER_SMTP_FROM", "outbox@example.com")
+    _write_contacts_file(tmp_path / "emails.json")
+
+    class FakeGen:
+        def generate(self, contact):
+            return EmailDraft(f"Hi {contact.name}", "Generated body.")
+
+    monkeypatch.setattr("linkdogger.cli.DraftGenerator", lambda settings: FakeGen())
+
+    class FakeSMTP:
+        messages: list = []
+
+        def __init__(self, host, port=587, timeout=15) -> None:
+            pass
+
+        def ehlo(self) -> None:
+            pass
+
+        def starttls(self) -> None:
+            pass
+
+        def login(self, user, password) -> None:
+            pass
+
+        def send_message(self, message) -> None:
+            FakeSMTP.messages.append(message)
+
+        def quit(self) -> None:
+            pass
+
+    monkeypatch.setattr("linkdogger.mail.sender.smtplib.SMTP", FakeSMTP)
+    result = runner.invoke(app, ["send", "emails.json", "--generate", "--delay", "0"])
+    assert result.exit_code == 0
+    assert "sent 2 of 2 emails" in result.output
+    assert [m["Subject"] for m in FakeSMTP.messages] == ["Hi Alice", "Hi Bob"]

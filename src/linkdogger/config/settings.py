@@ -57,6 +57,13 @@ class Settings(BaseSettings):
     imap_folder: str = "INBOX"
     imap_starttls: bool = False
 
+    # AI generation (send --generate), via an OpenAI-compatible endpoint
+    # such as NVIDIA NIM (build.nvidia.com).
+    ai_api_key: str | None = None
+    ai_model: str = "deepseek-ai/deepseek-v4-flash"
+    ai_base_url: str = "https://integrate.api.nvidia.com/v1"
+    ai_timeout_seconds: float = 60.0
+
 
 @lru_cache
 def get_settings() -> Settings:
