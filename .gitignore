@@ -30,3 +30,5 @@ htmlcov/
 .DS_Store
 Thumbs.db
 linkedin-cookies.json
+github.emails.json
+test.csv

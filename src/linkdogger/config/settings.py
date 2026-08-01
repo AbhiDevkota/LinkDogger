@@ -35,6 +35,28 @@ class Settings(BaseSettings):
     linkedin_cookies_dir: str | None = None
     linkedin_cookie_file: str | None = None
 
+    # Local IPC server (other processes on this machine).
+    ipc_host: str = "127.0.0.1"
+    ipc_port: int = 8123
+    ipc_token: str | None = None
+
+    # SMTP outbox (send command).
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    smtp_username: str | None = None
+    smtp_password: str | None = None
+    smtp_from: str | None = None
+    smtp_from_name: str | None = None
+    smtp_starttls: bool = True
+
+    # IMAP inbox (watch command).
+    imap_host: str | None = None
+    imap_port: int = 993
+    imap_username: str | None = None
+    imap_password: str | None = None
+    imap_folder: str = "INBOX"
+    imap_starttls: bool = False
+
 
 @lru_cache
 def get_settings() -> Settings:

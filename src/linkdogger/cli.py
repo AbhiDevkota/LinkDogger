@@ -3,6 +3,7 @@
 import json
 import logging
 import re
+import time
 from pathlib import Path
 
 import typer
@@ -10,8 +11,10 @@ from rich.console import Console
 
 from linkdogger import __version__
 from linkdogger.config.settings import get_settings
-from linkdogger.errors import SourceUnavailableError
+from linkdogger.errors import IPCError, SourceUnavailableError
+from linkdogger.ipc import IPCClient, IPCServer
 from linkdogger.linkedin_api import get_linkedin_client, validate_session
+from linkdogger.mcp_server import serve as mcp_serve
 from linkdogger.output.export import export_emails, export_result
 from linkdogger.output.json import render_json
 from linkdogger.output.table import render_table
@@ -230,6 +233,105 @@ def serve() -> None:
     _run_web()
 
 
+@app.command("ipc-serve")
+def ipc_serve() -> None:
+    """Start the local IPC server (JSON over localhost HTTP, for scripts)."""
+    settings = get_settings()
+    server = IPCServer(
+        _build_people_service(),
+        host=settings.ipc_host,
+        port=settings.ipc_port,
+        token=settings.ipc_token,
+        backend=settings.discovery_backend,
+    )
+    console.print("[bold cyan]LinkDogger[/bold cyan] IPC server")
+    console.print(
+        f"Listening on [bold]http://{settings.ipc_host}:{settings.ipc_port}/rpc[/bold]"
+    )
+    if settings.ipc_token:
+        console.print("Authentication token is enabled.")
+    console.print("Press Ctrl+C to stop.")
+    try:
+        server.start()
+        while True:
+            time.sleep(3600)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.stop()
+        console.print("[dim]IPC server stopped.[/dim]")
+
+
+@app.command()
+def ipc(
+    method: str = typer.Argument(
+        ...,
+        help="Method to call: ping, status, search or export_emails.",
+    ),
+    company: str | None = typer.Option(
+        None, "--company", "-c", help="Company name (search / export_emails)."
+    ),
+    provider: str = typer.Option(
+        "linkedin",
+        "--provider",
+        help="Data provider: linkedin, github, hybrid, or mock.",
+    ),
+    sort: str | None = typer.Option(
+        None, "--sort", help="Sort key (e.g. followers-desc, name-asc)."
+    ),
+    role: str | None = typer.Option(
+        None, "--role", help="Only show people whose role matches this text."
+    ),
+    location: str | None = typer.Option(
+        None, "--location", help="Only show people whose location matches this text."
+    ),
+    limit: int | None = typer.Option(
+        None, "--limit", help="Maximum number of results."
+    ),
+) -> None:
+    """Call a method on a running IPC server (see ``ipc-serve``)."""
+    if method not in ("ping", "status", "search", "export_emails"):
+        raise typer.BadParameter(
+            f"unknown method '{method}' (expected ping, status, search "
+            "or export_emails)"
+        )
+    if method in ("search", "export_emails") and not company:
+        raise typer.BadParameter(f"--company is required for the '{method}' method")
+    settings = get_settings()
+    client = IPCClient(settings.ipc_host, settings.ipc_port, token=settings.ipc_token)
+    try:
+        if method == "ping":
+            result = client.call("ping")
+        elif method == "status":
+            result = client.call("status")
+        else:
+            result = client.call(
+                method,
+                company=company,
+                sort=sort,
+                role=role,
+                location=location,
+                limit=limit,
+                provider=provider,
+            )
+    except IPCError as exc:
+        raise typer.BadParameter(str(exc)) from None
+    console.print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+@app.command()
+def mcp() -> None:
+    """Run the MCP (Model Context Protocol) stdio server for AI clients."""
+    error_console = Console(stderr=True)
+    settings = get_settings()
+    error_console.print(
+        f"[dim]LinkDogger MCP server (v{__version__}) on stdio — "
+        "speak JSON-RPC here.[/dim]"
+    )
+    code = mcp_serve(_build_people_service(), backend=settings.discovery_backend)
+    raise typer.Exit(code)
+
+
 def _linkedin_login() -> None:
     settings = get_settings()
     cookie_file = settings.linkedin_cookie_file
@@ -333,6 +435,20 @@ def config() -> None:
             "LINKDOGGER_LINKEDIN_COOKIE_FILE",
             settings.linkedin_cookie_file or "(not set)",
         ),
+        ("LINKDOGGER_IPC_HOST", settings.ipc_host),
+        ("LINKDOGGER_IPC_PORT", str(settings.ipc_port)),
+        ("LINKDOGGER_IPC_TOKEN", _redact(settings.ipc_token)),
+        ("LINKDOGGER_SMTP_HOST", settings.smtp_host or "(not set)"),
+        ("LINKDOGGER_SMTP_PORT", str(settings.smtp_port)),
+        ("LINKDOGGER_SMTP_USERNAME", settings.smtp_username or "(not set)"),
+        ("LINKDOGGER_SMTP_PASSWORD", _redact(settings.smtp_password)),
+        ("LINKDOGGER_SMTP_FROM", settings.smtp_from or "(not set)"),
+        ("LINKDOGGER_SMTP_FROM_NAME", settings.smtp_from_name or "(not set)"),
+        ("LINKDOGGER_IMAP_HOST", settings.imap_host or "(not set)"),
+        ("LINKDOGGER_IMAP_PORT", str(settings.imap_port)),
+        ("LINKDOGGER_IMAP_USERNAME", settings.imap_username or "(not set)"),
+        ("LINKDOGGER_IMAP_PASSWORD", _redact(settings.imap_password)),
+        ("LINKDOGGER_IMAP_FOLDER", settings.imap_folder),
     ]
     for name, value in fields:
         console.print(f"  [bold]{name}[/bold] = {value}")
